@@ -85,7 +85,7 @@ abstract class SocketProvider extends BaseProvider
                     $this->writer = new Channel(1);
                     $this->writer->push(true);
                     $this->onOpen();
-                    $interval = (float) ($this->options['ping_interval'] ?? 20);
+                    $interval = (float) ($this->options['ping_interval'] ?? $this->options['heartbeat'] ?? 20);
                     if ($this->socket === $socket && $interval > 0) {
                         $this->pingTimer = Timer::tick(max(1, (int) ($interval * 1000)),
                             function () use ($socket): void {
@@ -155,6 +155,9 @@ abstract class SocketProvider extends BaseProvider
             return;
         }
         try {
+            if (! $socket->push('', 9)) {
+                throw new RuntimeException('WebSocket ping failed');
+            }
             $this->onPing();
         } catch (Throwable $error) {
             $this->disconnect($socket);
@@ -177,6 +180,18 @@ abstract class SocketProvider extends BaseProvider
         } elseif ($this->socket !== null) {
             $this->disconnect($this->socket);
         }
+    }
+
+    /** Wait for the persistent connection when a caller has work that cannot be dropped. */
+    final protected function awaitConnection(float $timeout): bool
+    {
+        $this->connect();
+        $deadline = microtime(true) + max(0, $timeout);
+        while (! $this->isConnected() && microtime(true) < $deadline) {
+            Coroutine::sleep(0.01);
+        }
+
+        return $this->isConnected();
     }
 
     private function disconnect(Client $socket): void

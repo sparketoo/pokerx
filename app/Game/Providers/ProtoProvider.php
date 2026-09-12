@@ -13,16 +13,56 @@ use App\Model\GamePlayer;
 use App\Vo\Game\RequestActionResultVo;
 use Carbon\CarbonImmutable;
 use Hyperf\Stringable\Str;
+use Swoole\Coroutine;
+use Throwable;
+
 
 final class ProtoProvider extends SocketJsonProvider
 {
+    private bool $authenticated = false;
+
+    private ?string $sessionId = null;
+
     protected function onOpen(): void
     {
-        $this->send(['token' => $this->options['token'] ?? '', 'descr' => 'PokerX']);
+        $this->authenticated = false;
+        $authentication = array_filter([
+            'token' => $this->options['token'] ?? '',
+            'sessionId' => $this->sessionId,
+            'descr' => 'PokerX',
+        ], static fn (?string $value): bool => $value !== null);
+        if (! $this->send($authentication)) {
+            throw new \RuntimeException('Proto authentication could not be sent');
+        }
+        $this->logger()->info('Proto provider connected; authentication sent');
     }
 
     protected function onMessage(array $message, int $opcode): void
     {
+        $this->logger()->info('Proto provider message received', [
+            'struct_type' => $message['structType'] ?? null,
+            'game_id' => $message['gameId'] ?? null,
+        ]);
+        if (array_key_exists('result', $message)) {
+            $this->authenticated = ($message['result'] ?? false) === true;
+            if ($this->authenticated) {
+                $this->sessionId = isset($message['sessionId']) ? (string) $message['sessionId'] : null;
+                $this->logger()->info('Proto provider authenticated', ['has_session' => $this->sessionId !== null]);
+            } else {
+                $this->logger()->warning('Proto provider authentication rejected', ['info' => $message['info'] ?? null]);
+            }
+
+            return;
+        }
+        if (isset($message['error'])) {
+            $gameId = isset($message['gameId']) ? (string) $message['gameId'] : null;
+            $this->logger()->warning('Proto provider rejected game request', ['game_id' => $gameId, 'error' => $message['error']]);
+            if ($gameId !== null && $this->hasRequestActionCallback($gameId)) {
+                $this->callRequestActionCallback($gameId, RequestActionResultVo::failure(PokerException::providerRejected()));
+            }
+
+            return;
+        }
         if (empty($message['gameId']) || empty($message['structType'])) {
             return;
         }
@@ -40,13 +80,18 @@ final class ProtoProvider extends SocketJsonProvider
      */
     public function handlePlayerAction(array $message): void
     {
-        if (! $this->hasRequestActionCallback($message['gameId']) || empty($message['action'])) {
+        if (! $this->hasRequestActionCallback($message['gameId'])) {
             return;
         }
 
         if (isset($message['error'])) {
             $result = RequestActionResultVo::failure(PokerException::providerRejected());
             $this->callRequestActionCallback($message['gameId'], $result);
+
+            return;
+        }
+        if (empty($message['action'])) {
+            $this->callRequestActionCallback($message['gameId'], RequestActionResultVo::failure(PokerException::providerRejected()));
 
             return;
         }
@@ -74,13 +119,50 @@ final class ProtoProvider extends SocketJsonProvider
             throw PokerException::solveInProgress();
         }
         $this->setRequestActionCallback($game->uuid, $callback);
-        $this->send($this->gameEvents($game));
-        $this->send([
-            'structType' => 'getAnwser',
+        if (! $this->awaitAuthenticated((float) ($this->options['connect_timeout'] ?? 10))) {
+            $this->callRequestActionCallback($game->uuid, RequestActionResultVo::failure(PokerException::providerRejected()));
+
+            return;
+        }
+        $synced = $this->send($this->gameEvents($game));
+        $requested = $synced && $this->send([
+            'structType' => 'getAnswer',
             'gameId' => $game->uuid,
             'potForAlpha' => $game->getAllPot(),
             'delay' => (int) ($this->options['delay'] ?? 9000),
         ]);
+        if (! $requested) {
+            $this->callRequestActionCallback($game->uuid, RequestActionResultVo::failure(PokerException::providerRejected()));
+
+            return;
+        }
+        $this->logger()->info('Proto solve request dispatched', ['game_id' => $game->uuid, 'pot' => $game->getAllPot()]);
+    }
+
+    protected function onError(Throwable $error): void
+    {
+        $this->logger()->warning('Proto provider connection error', [
+            'exception' => $error::class,
+            'message' => $error->getMessage(),
+        ]);
+    }
+
+    protected function onClose(): void
+    {
+        $this->authenticated = false;
+    }
+
+    private function awaitAuthenticated(float $timeout): bool
+    {
+        if (! $this->awaitConnection($timeout)) {
+            return false;
+        }
+        $deadline = microtime(true) + max(0, $timeout);
+        while (! $this->authenticated && microtime(true) < $deadline) {
+            Coroutine::sleep(0.01);
+        }
+
+        return $this->authenticated;
     }
 
     public function over(Game $game): void

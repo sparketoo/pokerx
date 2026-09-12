@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Model;
 
+use App\Constants\GameEvent;
+use App\Enum\ActionEnum;
 use App\Enum\GameStatusEnum;
 use Carbon\Carbon;
 use Hyperf\Database\Model\Collection;
@@ -66,9 +68,47 @@ class Game extends Model
 
     public function getAllPot(): float
     {
-        $sum = 0;
+        $sum = 0.0;
+        $streetContributions = [];
+        $currentBet = 0.0;
+        foreach ($this->players as $player) {
+            $blind = (float) $player->blind_amount;
+            $streetContributions[$player->name] = $blind;
+            $currentBet = max($currentBet, $blind);
+            $sum += $blind;
+        }
         foreach ($this->events as $event) {
-            $sum += $event['payload']['amount'] ?? 0;
+            if ($event->type === GameEvent::GAME_STAGE && ($event->payload['stage'] ?? null) !== 'preflop') {
+                $streetContributions = [];
+                $currentBet = 0.0;
+
+                continue;
+            }
+            if ($event->type !== GameEvent::GAME_PLAY_ACTED) {
+                continue;
+            }
+            $name = (string) ($event->payload['name'] ?? '');
+            $amount = (float) ($event->payload['amount'] ?? 0);
+            $action = ActionEnum::fromNameOrFail(strtoupper((string) ($event->payload['action'] ?? '')));
+            if ($action->isRaise()) {
+                $target = $currentBet + $amount;
+                $sum += max(0, $target - ($streetContributions[$name] ?? 0));
+                $streetContributions[$name] = $target;
+                $currentBet = $target;
+
+                continue;
+            }
+            if ($action->isCall() || $action->isBet()) {
+                $sum += max(0, $amount - ($streetContributions[$name] ?? 0));
+                $streetContributions[$name] = $amount;
+                $currentBet = max($currentBet, $amount);
+
+                continue;
+            }
+            if ($action->isAllIn()) {
+                $sum += $amount;
+                $streetContributions[$name] = ($streetContributions[$name] ?? 0) + $amount;
+            }
         }
 
         return $sum;

@@ -24,6 +24,7 @@ use Hyperf\Validation\Contract\ValidatorFactoryInterface;
 use Hyperf\Validation\ValidationException;
 use Hyperf\WebSocketServer\Sender;
 use Psr\Log\LoggerInterface;
+use Swoole\Coroutine;
 use Throwable;
 
 final class PokerServer implements OnCloseInterface, OnMessageInterface, OnOpenInterface
@@ -116,7 +117,7 @@ final class PokerServer implements OnCloseInterface, OnMessageInterface, OnOpenI
     {
         /** @var string $type */
         $type = $message['type'];
-        $method = 'handle'.ucfirst($type);
+        $method = 'handle'.Str::studly($type);
         if (! method_exists($this, $method)) {
             throw GatewayException::eventInvalid();
         }
@@ -233,7 +234,18 @@ final class PokerServer implements OnCloseInterface, OnMessageInterface, OnOpenI
 
     private function connection(int $fd): PokerServerConnectionVo
     {
-        return $this->connections[$fd] ?? throw AuthException::authRequired();
+        // Hyperf invokes OnOpen through a deferred callback. A client can send its
+        // first frame immediately after the upgrade, before that callback stores
+        // the authenticated connection. Yield briefly so that a valid first frame
+        // is not rejected merely because of scheduler ordering.
+        for ($attempt = 0; $attempt < 50; $attempt++) {
+            if (isset($this->connections[$fd])) {
+                return $this->connections[$fd];
+            }
+            Coroutine::sleep(0.001);
+        }
+
+        throw AuthException::authRequired();
     }
 
     /** @param  array<string, mixed>  $payload */
