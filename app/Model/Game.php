@@ -18,6 +18,7 @@ use Hyperf\Database\Model\Relations\HasMany;
  * @property string $room_number
  * @property int $hand_number
  * @property string $provider
+ * @property string $game_type
  * @property float $big_blind
  * @property float $small_blind
  * @property float $ante
@@ -69,6 +70,7 @@ class Game extends Model
         foreach ($this->events as $event) {
             $sum += $event['payload']['amount'] ?? 0;
         }
+
         return $sum;
     }
 }

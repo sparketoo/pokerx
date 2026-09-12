@@ -8,7 +8,6 @@ use App\Constants\GameEvent;
 use App\Enum\SeatTypeEnum;
 use App\Exception\AppException;
 use App\Exception\AuthException;
-use App\Exception\FoundationException;
 use App\Exception\GatewayException;
 use App\Game\Providers\ProviderInterface;
 use App\Model\Game;
@@ -50,9 +49,11 @@ final class PokerServer implements OnCloseInterface, OnMessageInterface, OnOpenI
 
         if (! $token) {
             $server->disconnect($request->fd);
+
+            return;
         }
 
-        $token = $this->tokenService->findToken($token);
+        $token = $this->tokenService->validateToken($token);
         if (empty($token->user)) {
             $server->disconnect($request->fd);
 
@@ -86,7 +87,7 @@ final class PokerServer implements OnCloseInterface, OnMessageInterface, OnOpenI
                 return;
             }
 
-            $this->handleGameEvemts($fd, $id, $message);
+            $this->handleGameEvents($fd, $id, $message);
 
         } catch (Throwable $error) {
             $this->replyError($fd, $error, $id);
@@ -111,7 +112,7 @@ final class PokerServer implements OnCloseInterface, OnMessageInterface, OnOpenI
      * @throws AuthException
      * @throws GatewayException
      */
-    protected function handleGameEvemts(int $fd, string $id, array $message): void
+    protected function handleGameEvents(int $fd, string $id, array $message): void
     {
         /** @var string $type */
         $type = $message['type'];
@@ -132,15 +133,18 @@ final class PokerServer implements OnCloseInterface, OnMessageInterface, OnOpenI
             $message['payload'] ?? [],
             $message['timestamp'],
         );
-        $this->$method($message);
+        $game = $this->$method($message);
+
+        $this->reply($fd, $type.'.ack', ['game_uuid' => $game->uuid], $id);
     }
 
-    public function handleGameStart(PokerServerMessageVo $message): void
+    public function handleGameStart(PokerServerMessageVo $message): Game
     {
         $payload = $this->validatorFactory->make($message->payload, [
             'room_number' => ['required', 'string', 'max:64'],
             'hand_number' => ['required', 'integer', 'min:1'],
             'provider' => ['required', 'string', 'max:32'],
+            'game_type' => ['sometimes', 'string', 'max:32'],
             'big_blind' => ['required', 'numeric', 'decimal:0,4', 'min:0.0001', 'max:9999999999.9999'],
             'small_blind' => [
                 'required', 'numeric', 'decimal:0,4', 'min:0.0001', 'max:9999999999.9999', 'lte:big_blind',
@@ -165,34 +169,49 @@ final class PokerServer implements OnCloseInterface, OnMessageInterface, OnOpenI
             $payload['small_blind'],
             $payload['ante'] ?? 0,
             $payload['players'],
+            $message->id,
+            $payload,
+            $payload['game_type'] ?? 'NL',
         );
         $game->loadMissing(['players', 'events']);
 
-        $this->provider($message)->start($game);
+        $this->providerFor($game)->start($game);
+
+        return $game;
     }
 
-    public function handleGameStage(PokerServerMessageVo $message): void
+    public function handleGameStage(PokerServerMessageVo $message): Game
     {
-        $this->provider($message)->stage($this->findGame($message));
+        $game = $this->append($message);
+        $this->providerFor($game)->stage($game);
+
+        return $game;
     }
 
-    public function handleGamePlayActed(PokerServerMessageVo $message): void
+    public function handleGamePlayActed(PokerServerMessageVo $message): Game
     {
-        $this->provider($message)->playerActed($this->findGame($message));
+        $game = $this->append($message);
+        $this->providerFor($game)->playerActed($game);
+
+        return $game;
     }
 
-    public function handleGameKnownPlayCards(PokerServerMessageVo $message): void
+    public function handleGameKnownPlayCards(PokerServerMessageVo $message): Game
     {
-        $this->provider($message)->knownPlayerCards($this->findGame($message));
+        $game = $this->append($message);
+        $this->providerFor($game)->knownPlayerCards($game);
+
+        return $game;
     }
 
-    public function handleGameRequestAction(PokerServerMessageVo $message): void
+    public function handleGameRequestAction(PokerServerMessageVo $message): Game
     {
-        $this->provider($message)->requestAction($this->findGame($message),
-            function (RequestActionResultVo $result) use ($message) {
+        $game = $this->append($message);
+        $this->providerFor($game)->requestAction($game,
+            function (RequestActionResultVo $result) use ($message, $game) {
                 if ($result->success) {
                     $this->reply($message->fd, 'game_play_action', [
-                        'hand_id' => $message->payload['hand_id'],
+                        'game_uuid' => $game->uuid,
                         'action' => $result->action?->wire(),
                         'amount' => $result->amount,
                     ], $message->id);
@@ -200,11 +219,16 @@ final class PokerServer implements OnCloseInterface, OnMessageInterface, OnOpenI
                     $this->replyError($message->fd, new \RuntimeException($result->reason ?? 'Unknown error'));
                 }
             });
+
+        return $game;
     }
 
-    public function handleGameOver(PokerServerMessageVo $message): void
+    public function handleGameOver(PokerServerMessageVo $message): Game
     {
-        $this->provider($message)->over($this->findGame($message));
+        $game = $this->append($message);
+        $this->providerFor($game)->over($game);
+
+        return $game;
     }
 
     private function connection(int $fd): PokerServerConnectionVo
@@ -252,25 +276,19 @@ final class PokerServer implements OnCloseInterface, OnMessageInterface, OnOpenI
         }
     }
 
-    /**
-     * 处理事件并构造游戏上下文
-     */
-    protected function findGame(PokerServerMessageVo $message): Game
+    private function append(PokerServerMessageVo $message): Game
     {
-        $game = Game::query()
-            ->where('uuid', $message->payload['game_uuid'])
-            ->where('user_id', $message->user->id)
-            ->first();
-        if (empty($game)) {
-            throw FoundationException::dataNotFound();
-        }
-        $game->loadMissing(['players', 'events']);
-
-        return $game;
+        return $this->gameService->append(
+            $message->user,
+            (string) $message->payload['game_uuid'],
+            $message->id,
+            $message->type,
+            $message->payload,
+        );
     }
 
-    protected function provider(PokerServerMessageVo $message): ProviderInterface
+    private function providerFor(Game $game): ProviderInterface
     {
-        return $this->poker->provider($message->payload['provider'] ?? null);
+        return $this->poker->provider($game->provider);
     }
 }

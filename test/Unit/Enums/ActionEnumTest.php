@@ -10,5 +10,6 @@ it('preserves every ActionEnum case and predicate', function () {
         foreach (ActionEnum::cases() as $other) {
             expect($other->$method())->toBe($other === $case);
         }
+        expect($case->wire())->toBe(strtolower(str_replace('_', '-', $case->name)));
     }
 });

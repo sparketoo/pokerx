@@ -60,7 +60,10 @@ final class PokerManager
      */
     protected function createProtoProvider(array $config = []): ProtoProvider
     {
-        return new ProtoProvider($config);
+        $provider = new ProtoProvider($config);
+        $provider->connect();
+
+        return $provider;
     }
 
     /**

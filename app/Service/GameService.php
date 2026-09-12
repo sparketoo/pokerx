@@ -4,8 +4,11 @@ declare(strict_types=1);
 
 namespace App\Service;
 
+use App\Constants\GameEvent;
+use App\Enum\GameStatusEnum;
 use App\Enum\SeatTypeEnum;
 use App\Exception\GameException;
+use App\Model\Event;
 use App\Model\Game;
 use App\Model\User;
 use Hyperf\DbConnection\Db as DB;
@@ -18,6 +21,7 @@ final class GameService
 
     /**
      * @param  list<array{seat: int, name: string, hero: bool, stack: float, seat_type: string, amount: ?float, cards?: list<string>|null}>  $players
+     * @param  array<string, mixed>  $eventPayload
      */
     public function create(
         User $user,
@@ -28,11 +32,14 @@ final class GameService
         float $smallBlind,
         float $ante,
         array $players,
+        string $eventUuid,
+        array $eventPayload,
+        string $gameType = 'NL',
     ): Game {
         $uuid = Str::uuid()->toString();
         DB::beginTransaction();
         try {
-            if ($this->exists($user->id, $roomNumber, $handNumber)) {
+            if ($this->exists($user->id, $gameType, $roomNumber, $handNumber)) {
                 throw GameException::gameAlreadyExists();
             }
 
@@ -46,6 +53,7 @@ final class GameService
                 'room_number' => $roomNumber,
                 'hand_number' => $handNumber,
                 'provider' => $provider,
+                'game_type' => $gameType,
                 'big_blind' => $bigBlind,
                 'small_blind' => $smallBlind,
                 'ante' => $ante,
@@ -71,6 +79,13 @@ final class GameService
             });
 
             $game->players()->createMany($players->toArray());
+            $game->events()->create([
+                'uuid' => $eventUuid,
+                'user_id' => $user->id,
+                'seq' => 1,
+                'type' => GameEvent::GAME_START,
+                'payload' => $eventPayload,
+            ]);
             DB::commit();
 
             return $game;
@@ -81,10 +96,44 @@ final class GameService
 
     }
 
-    public function exists(int $userId, string $roomNumber, int $handNumber): bool
+    /**
+     * Persist an accepted follow-up event and derive the game lifecycle state.
+     * Idempotent replay is deliberately not handled here yet.
+     *
+     * @param  array<string, mixed>  $payload
+     */
+    public function append(User $user, string $gameUuid, string $eventUuid, string $type, array $payload): Game
+    {
+        return DB::transaction(function () use ($user, $gameUuid, $eventUuid, $type, $payload): Game {
+            /** @var Game $game */
+            $game = Game::query()
+                ->where('uuid', $gameUuid)
+                ->where('user_id', $user->id)
+                ->lockForUpdate()
+                ->firstOrFail();
+            $seq = (int) Event::query()->where('game_id', $game->id)->max('seq') + 1;
+            $game->events()->create([
+                'uuid' => $eventUuid,
+                'user_id' => $user->id,
+                'seq' => $seq,
+                'type' => $type,
+                'payload' => $payload,
+            ]);
+            if ($type === GameEvent::GAME_OVER && $game->status->isOpen()) {
+                $game->status = GameStatusEnum::CLOSED;
+                $game->saveOrFail();
+            }
+            $game->load(['players', 'events']);
+
+            return $game;
+        });
+    }
+
+    public function exists(int $userId, string $gameType, string $roomNumber, int $handNumber): bool
     {
         return Game::query()
             ->where('user_id', $userId)
+            ->where('game_type', $gameType)
             ->where('room_number', $roomNumber)
             ->where('hand_number', $handNumber)
             ->exists();

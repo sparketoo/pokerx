@@ -4,14 +4,10 @@ declare(strict_types=1);
 
 namespace App\Controller;
 
-use App\Model\CreditRecord;
 use App\Request\Mine\UpdateLanguageRequest;
 use App\Request\Mine\UpdateNicknameRequest;
 use Hyperf\HttpServer\Request;
-use Hyperf\Redis\Redis;
 use Psr\Http\Message\ResponseInterface as JsonResponse;
-
-use function App\Support\di;
 
 class MineController extends ApiController
 {

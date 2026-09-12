@@ -38,7 +38,7 @@ final class MockProvider extends BaseProvider
         });
     }
 
-    public function over(Game $game): void
+    public function stage(Game $game): void
     {
         $timer = $this->timers[$game->uuid] ?? null;
         if ($timer === null) {
@@ -81,7 +81,7 @@ final class MockProvider extends BaseProvider
             }
 
             $amount = (int) ($event->payload['amount'] ?? 0);
-            $toCall = max($roundBets) - $roundBets[$name];
+            $toCall = $this->highestRoundBet($roundBets) - $roundBets[$name];
             $paid = match ($action) {
                 ActionEnum::FOLD, ActionEnum::CHECK => 0,
                 ActionEnum::CALL, ActionEnum::BET => $amount,
@@ -94,7 +94,7 @@ final class MockProvider extends BaseProvider
         }
 
         $hero = $game->hero();
-        $call = max($roundBets) - $roundBets[$hero->name];
+        $call = $this->highestRoundBet($roundBets) - $roundBets[$hero->name];
         $remainingStack = $remainingStacks[$hero->name];
 
         return $call === 0
@@ -102,5 +102,11 @@ final class MockProvider extends BaseProvider
             : ($call < $remainingStack
                 ? RequestActionResultVo::success(ActionEnum::CALL, (int) $call)
                 : RequestActionResultVo::success(ActionEnum::ALL_IN, (int) $remainingStack));
+    }
+
+    /** @param array<string, float|int> $roundBets */
+    private function highestRoundBet(array $roundBets): float|int
+    {
+        return $roundBets === [] ? 0 : max($roundBets);
     }
 }

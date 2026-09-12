@@ -100,7 +100,7 @@ abstract class ApiController extends AbstractController
     protected function revoke(User $user, ?string $plain = null): void
     {
         if ($plain !== null) {
-            UserToken::query()->where('id', (int) explode('|', $plain, 2)[0])->where('tokenable_id',
+            UserToken::query()->where('id', (int) explode('|', $plain, 2)[0])->where('user_id',
                 $user->id)->delete();
 
             return;

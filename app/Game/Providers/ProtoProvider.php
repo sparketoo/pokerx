@@ -120,7 +120,7 @@ final class ProtoProvider extends SocketJsonProvider
                     $events[] = [
                         'eventType' => 'stageStarted',
                         'stage' => strtolower($stage->name),
-                        'cards' => $event->payload['cards']?->implode(','),
+                        'cards' => implode(',', $event->payload['cards'] ?? []),
                     ];
                     if ($stage->isPreflop()) {
                         $events[] = [
@@ -135,7 +135,7 @@ final class ProtoProvider extends SocketJsonProvider
                     $events[] = [
                         'eventType' => 'playerActed',
                         'name' => $payload['name'],
-                        'action' => $action,
+                        'action' => $action->wire(),
                         'amount' => $payload['amount'],
                     ];
                     break;

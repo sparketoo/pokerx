@@ -13,6 +13,7 @@ return new class extends Migration
             $t->id();
             $t->uuid('uuid')->unique()->comment('游戏UUID');
             $t->foreignId('user_id')->constrained();
+            $t->string('game_type', 32)->after('provider');
             $t->string('room_number', 64)->comment('房间号');
             $t->unsignedInteger('hand_number')->comment('第几手');
             $t->string('provider', 32)->comment('服务商');
@@ -27,6 +28,7 @@ return new class extends Migration
             $t->index(['user_id', 'created_at', 'id']);
             $t->index(['user_id', 'status']);
             $t->timestamps(6);
+            $t->unique(['user_id', 'game_type', 'room_number', 'hand_number'], 'games_user_type_room_hand_unique');
         });
     }
 
