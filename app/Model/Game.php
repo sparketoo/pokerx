@@ -10,22 +10,23 @@ use Hyperf\Database\Model\Collection;
 use Hyperf\Database\Model\Relations\HasMany;
 
 /**
- * @property Collection<int, Event> $events
- * @property Collection<int, Solve> $solves
  * @property int $id
  * @property Carbon $created_at
  * @property Carbon $updated_at
  * @property string $uuid
  * @property int $user_id
- * @property string $room_id
- * @property string $hand_number
+ * @property string $room_number
+ * @property int $hand_number
  * @property string $provider
- * @property int $big_blind
- * @property int $ante
+ * @property float $big_blind
+ * @property float $small_blind
+ * @property float $ante
  * @property GameStatusEnum $status
- * @property ?int $invested
- * @property ?int $awarded
- * @property ?int $profit
+ * @property ?float $bet_amount
+ * @property ?float $winnings
+ * @property ?float $profit
+ * @property Collection<int, GamePlayer> $players
+ * @property Collection<int, Event> $events
  */
 class Game extends Model
 {
@@ -37,6 +38,12 @@ class Game extends Model
     /** @var array<string, string> */
     protected array $casts = [
         'status' => GameStatusEnum::class,
+        'big_blind' => 'float',
+        'small_blind' => 'float',
+        'ante' => 'float',
+        'bet_amount' => 'float',
+        'winnings' => 'float',
+        'profit' => 'float',
     ];
 
     /** @return HasMany<GamePlayer, static> */
@@ -51,9 +58,17 @@ class Game extends Model
         return $this->hasMany(Event::class);
     }
 
-    /** @return HasMany<Solve, static> */
-    public function solves(): HasMany
+    public function hero(): GamePlayer
     {
-        return $this->hasMany(Solve::class);
+        return $this->players->where('is_hero', true)->firstOrFail();
+    }
+
+    public function getAllPot(): float
+    {
+        $sum = 0;
+        foreach ($this->events as $event) {
+            $sum += $event['payload']['amount'] ?? 0;
+        }
+        return $sum;
     }
 }

@@ -59,8 +59,10 @@ class WebSocket:
             if op==9:self.send_frame(data,10);continue
             if op==10:continue
             if op==8:raise EOFError('WebSocket closed')
-            return json.loads(data)
-    def auth(self,token):self.send({'token':token,'client_version':'smoke','client_platform':'chrome'});v=self.recv();assert v['type']=='auth_ok',v;return v
+            message=json.loads(data)
+            assert isinstance(message.get('timestamp'),int) and message['timestamp']>0,message
+            return message
+    def auth(self,token):self.send({'token':token,'client_version':'smoke','client_platform':'chrome','timestamp':int(time.time()*1000)});v=self.recv();assert v['type']=='auth_ok',v;return v
     def close(self):
         try:self.send_frame(b'',8)
         except OSError:pass
@@ -68,4 +70,6 @@ class WebSocket:
 
 def events():
     x=json.loads((ROOT.parent/'docs/GATEWAY-V1-EXAMPLES.json').read_text())
-    return sorted([v for k,v in x['packets'].items() if k.startswith('client_') and v.get('type','').startswith('game_')],key=lambda v:v['seq'])
+    values=sorted([v for k,v in x['packets'].items() if k.startswith('client_') and v.get('type','').startswith('game_')],key=lambda v:v['seq'])
+    for event in values:event['timestamp']=int(time.time()*1000)
+    return values

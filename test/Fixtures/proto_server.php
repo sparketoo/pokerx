@@ -20,6 +20,14 @@ $server->on('message', function ($server, $frame) use (&$games, &$authenticated)
         return;
     }
     if (($m['structType'] ?? null) === 'gameEvents') {
+        $previous = $games[$fd]['events'] ?? null;
+        $events = $m['events'] ?? null;
+        if (! is_array($events) || ($previous !== null && (count($events) !== count($previous) + 1 ||
+            array_slice($events, 0, -1) !== $previous))) {
+            $server->push($fd, json_encode(['error' => 'events must advance by one ordered event', 'gameId' => $m['game']['gameId'] ?? null]));
+
+            return;
+        }
         $games[$fd] = $m;
 
         return;

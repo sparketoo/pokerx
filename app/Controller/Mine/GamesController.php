@@ -90,7 +90,6 @@ class GamesController extends ApiController
             $q->where('created_at', '<', Date::parse($f['end'], 'Asia/Shanghai')->addDay()->utc());
         }
 
-        $q->withSum('solves', 'cost');
         if (($f['result'] ?? 'all') === 'win') {
             $q->where('profit', '>', 0);
         }
@@ -140,7 +139,7 @@ class GamesController extends ApiController
     public function detail(DetailRequest $r): JsonResponse
     {
         $g = Game::query()->where('user_id', $this->user($r)->id)->where('uuid', $r->gameId())->with([
-            'players', 'solves',
+            'players',
         ])->first();
         $live = json_decode(di(Redis::class)->get('{'.$this->user($r)->id.'}:state') ?: 'null', true, 512,
             JSON_THROW_ON_ERROR)['games'][$r->gameId()]['context'] ?? null;
@@ -171,7 +170,7 @@ class GamesController extends ApiController
         if ($r->scope() === 'mine') {
             $hero = $g->players()->where('is_hero', true)->value('name');
             $q->where(function ($q) use ($hero) {
-                $q->where('payload->name', $hero)->orWhereIn('type', ['game_start', 'game_get_solve', 'game_over']);
+                $q->where('payload->name', $hero)->orWhereIn('type', ['game_start', 'game_request_action', 'game_over']);
             });
         }
 

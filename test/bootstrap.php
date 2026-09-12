@@ -22,6 +22,16 @@ ini_set('display_startup_errors', 'on');
 error_reporting(E_ALL);
 date_default_timezone_set('Asia/Shanghai');
 
+foreach ([
+    'APP_ENV' => 'testing',
+    'DB_DATABASE' => 'pokerx_hyperf_test',
+    'REDIS_PREFIX' => 'pokerx_hyperf_test:',
+] as $key => $value) {
+    putenv($key.'='.$value);
+    $_ENV[$key] = $value;
+    $_SERVER[$key] = $value;
+}
+
 ! defined('BASE_PATH') && define('BASE_PATH', dirname(__DIR__, 1));
 
 require dirname(__DIR__).'/vendor/autoload.php';

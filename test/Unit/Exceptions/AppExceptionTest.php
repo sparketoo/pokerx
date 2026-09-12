@@ -2,7 +2,9 @@
 
 use App\Exception\AppException;
 use App\Exception\AuthException;
+use App\Exception\CreditException;
 use App\Exception\FoundationException;
+use App\Exception\GameException;
 use App\Exception\GatewayException;
 use App\Exception\PokerException;
 use Hyperf\Contract\TranslatorInterface;
@@ -10,7 +12,7 @@ use Hyperf\Stringable\Str;
 
 it('provides unique scoped exception codes and translated safe messages', function () {
     $codes = [];
-    foreach ([AuthException::class, FoundationException::class, GatewayException::class, PokerException::class] as $class) {
+    foreach ([CreditException::class, AuthException::class, FoundationException::class, GameException::class, GatewayException::class, PokerException::class] as $class) {
         foreach ((new ReflectionClass($class))->getMethods(ReflectionMethod::IS_STATIC) as $method) {
             if ($method->getDeclaringClass()->getName() !== $class || ! $method->isPublic()) {
                 continue;

@@ -12,6 +12,11 @@ final class FoundationException extends AppException
         return self::create(__FUNCTION__)->withDetails($details)->error();
     }
 
+    public static function dataNotFound(): self
+    {
+        return self::create(__FUNCTION__);
+    }
+
     /** @param  array<string, mixed>  $details */
     public static function notFound(array $details = []): self
     {

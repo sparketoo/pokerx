@@ -12,14 +12,13 @@ return new class extends Migration
         Schema::create('game_players', function (Blueprint $t) {
             $t->id();
             $t->foreignId('game_id')->constrained();
-            $t->unsignedSmallInteger('seat');
-            $t->string('name', 64)->collation(\Hyperf\Config\config('databases.default.driver') === 'mysql' ? 'utf8mb4_bin' : 'BINARY');
-            $t->boolean('is_hero')->default(false);
-            $t->unsignedBigInteger('stack');
-            $t->enum('seat_type', SeatTypeEnum::names());
-            $t->unsignedBigInteger('blind_amount')->nullable();
-            $t->unsignedBigInteger('ante')->default(0);
-            $t->json('cards')->nullable();
+            $t->unsignedSmallInteger('seat')->comment('座位号');
+            $t->string('name', 64)->comment('玩家名称');
+            $t->boolean('is_hero')->default(false)->comment('是否本人');
+            $t->decimal('stack', 14, 4)->unsigned()->comment('总筹码');
+            $t->enum('seat_type', SeatTypeEnum::names())->comment('座位类型');
+            $t->decimal('blind_amount', 14, 4)->unsigned()->nullable()->comment('大盲注');
+            $t->json('cards')->nullable()->comment('已知手牌');
             $t->unique(['game_id', 'seat']);
             $t->unique(['game_id', 'name']);
             $t->timestamps(6);

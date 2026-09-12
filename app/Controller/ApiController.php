@@ -5,8 +5,8 @@ declare(strict_types=1);
 namespace App\Controller;
 
 use App\Exception\AuthException;
-use App\Model\PersonalAccessToken;
 use App\Model\User;
+use App\Model\UserToken;
 use App\Service\TotpService;
 use DateTimeInterface;
 use Hyperf\Collection\Collection;
@@ -19,7 +19,6 @@ use Psr\Http\Message\ResponseInterface as JsonResponse;
 use UnitEnum;
 
 use function App\Support\di;
-use function Hyperf\Config\config;
 
 abstract class ApiController extends AbstractController
 {
@@ -42,7 +41,9 @@ abstract class ApiController extends AbstractController
     protected function success(mixed $data = null): JsonResponse
     {
         return di(ResponseInterface::class)->json([
-            'code' => 'success', 'message' => 'ok', 'data' => $this->normalize($data),
+            'code' => 'success',
+            'message' => 'ok',
+            'data' => $this->normalize($data),
         ]);
     }
 
@@ -98,24 +99,13 @@ abstract class ApiController extends AbstractController
 
     protected function revoke(User $user, ?string $plain = null): void
     {
-        $r = di(Redis::class);
         if ($plain !== null) {
-            $hash = hash('sha256', $plain);
-            $r->setex('revoked:'.$hash, config('poker.token_days') * 86400, '1');
-            $r->del('token:'.$hash);
-            di(Request::class);
-            PersonalAccessToken::query()->where('id', (int) explode('|', $plain, 2)[0])->where('tokenable_id',
+            UserToken::query()->where('id', (int) explode('|', $plain, 2)[0])->where('tokenable_id',
                 $user->id)->delete();
 
             return;
         }
-        $r->set('denied:'.$user->id, '1');
         $user->tokens()->delete();
-        foreach (di(Redis::class)->smembers('user_tokens:'.$user->id) as $hash) {
-            di(Redis::class)->del('token:'.$hash);
-        }
-        di(Redis::class)->del('user_tokens:'.$user->id);
-        $r->del('denied:'.$user->id);
     }
 
     /**
@@ -124,8 +114,12 @@ abstract class ApiController extends AbstractController
     protected function profile(User $u): array
     {
         return [
-            'is_vip' => $u->is_vip, 'id' => (string) $u->id, 'account' => $u->account, 'nickname' => $u->nickname,
-            'language' => $u->language, 'two_factor_enabled' => $u->two_factor_secret !== null,
+            'is_vip' => $u->is_vip,
+            'id' => (string) $u->id,
+            'account' => $u->account,
+            'nickname' => $u->nickname,
+            'language' => $u->language,
+            'two_factor_enabled' => $u->two_factor_secret !== null,
         ];
     }
 }

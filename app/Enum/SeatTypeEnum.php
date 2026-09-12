@@ -30,6 +30,11 @@ enum SeatTypeEnum
         return $this->is(self::BB);
     }
 
+    public function isBlind(): bool
+    {
+        return $this->isBb() || $this->isSb();
+    }
+
     public function isBtn(): bool
     {
         return $this->is(self::BTN);

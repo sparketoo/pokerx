@@ -19,7 +19,9 @@ return [
         'host' => env('REDIS_HOST', 'localhost'),
         'auth' => env('REDIS_AUTH', null),
         'port' => (int) env('REDIS_PORT', 6379),
-        'options' => [Redis::OPT_PREFIX => env('REDIS_PREFIX', 'pokerx_hyperf:')],
+        'options' => [
+            Redis::OPT_PREFIX => env('REDIS_PREFIX', 'pokerx_hyperf:'),
+        ],
         'db' => (int) env('REDIS_DB', 0),
         'pool' => [
             'min_connections' => 1,

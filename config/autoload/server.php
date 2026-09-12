@@ -1,6 +1,7 @@
 <?php
 
 declare(strict_types=1);
+
 /**
  * This file is part of Hyperf.
  *
@@ -12,6 +13,7 @@ declare(strict_types=1);
  *
  * @license  https://github.com/hyperf/hyperf/blob/master/LICENSE
  */
+
 use Hyperf\Framework\Bootstrap\PipeMessageCallback;
 use Hyperf\Framework\Bootstrap\WorkerExitCallback;
 use Hyperf\Framework\Bootstrap\WorkerStartCallback;
@@ -37,8 +39,10 @@ return [
             ],
         ],
         [
-            'name' => 'websocket', 'type' => Server::SERVER_WEBSOCKET,
-            'host' => \Hyperf\Support\env('POKER_WS_HOST', '127.0.0.1'), 'port' => (int) \Hyperf\Support\env('POKER_WS_PORT', 18081),
+            'name' => 'poker',
+            'type' => Server::SERVER_WEBSOCKET,
+            'host' => \Hyperf\Support\env('POKER_WS_HOST', '127.0.0.1'),
+            'port' => (int) \Hyperf\Support\env('POKER_WS_PORT', 18081),
             'sock_type' => SWOOLE_SOCK_TCP,
             'callbacks' => [
                 Event::ON_HAND_SHAKE => [Hyperf\WebSocketServer\Server::class, 'onHandShake'],

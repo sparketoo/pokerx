@@ -43,7 +43,7 @@ class StatsController extends ApiController
             $v = DB::transaction(function () use ($user, $start, $end, $a, $b) {
                 /** @var Collection<int, Game> $all */
                 $all = Game::query()->where('user_id', $user)->where('status', 'SETTLED')->with([
-                    'events' => fn ($q) => $q->where('type', 'game_over'), 'solves',
+                    'events' => fn ($q) => $q->where('type', 'game_over'),
                 ])->orderBy('id')->get();
                 $rows = [];
                 $life = ['hands' => 0, 'wins' => 0, 'invested' => 0, 'profit' => 0];
@@ -55,21 +55,21 @@ class StatsController extends ApiController
                     }
                     $day = $date->copy()->timezone('Asia/Shanghai')->toDateString();
                     $row = [
-                        'id' => (string) $g->id, 'uuid' => $g->uuid, 'room_id' => $g->room_id,
-                        'hand_number' => $g->hand_number, 'profit' => (int) $g->profit,
-                        'invested' => (int) $g->invested, 'awarded' => (int) $g->awarded,
-                        'points_cost' => $g->solves->sum('cost'), 'ended_at' => $date->toIso8601String(),
+                        'id' => (string) $g->id, 'uuid' => $g->uuid, 'room_id' => $g->room_number,
+                        'hand_number' => $g->hand_number, 'profit' => (float) $g->profit,
+                        'invested' => (float) $g->bet_amount, 'awarded' => (float) $g->winnings,
+                        'ended_at' => $date->toIso8601String(),
                         'date' => $day, 'status' => 'settled',
                     ];
                     $life['hands']++;
                     $life['wins'] += (int) ($g->profit >= 0);
-                    $life['invested'] += $g->invested;
+                    $life['invested'] += $g->bet_amount;
                     $life['profit'] += $g->profit;
                     if ($day >= $start && $day <= $end) {
                         $rows[] = $row;
                         $range['hands']++;
                         $range['wins'] += (int) ($g->profit >= 0);
-                        $range['invested'] += $g->invested;
+                        $range['invested'] += $g->bet_amount;
                         $range['profit'] += $g->profit;
                     }
                 }
@@ -137,7 +137,7 @@ class StatsController extends ApiController
             $v = DB::transaction(function () use ($user, $start, $end, $a, $b) {
                 /** @var Collection<int, Game> $all */
                 $all = Game::query()->where('user_id', $user)->where('status', 'SETTLED')->with([
-                    'events' => fn ($q) => $q->where('type', 'game_over'), 'solves',
+                    'events' => fn ($q) => $q->where('type', 'game_over'),
                 ])->orderBy('id')->get();
                 $rows = [];
                 $life = ['hands' => 0, 'wins' => 0, 'invested' => 0, 'profit' => 0];
@@ -149,21 +149,21 @@ class StatsController extends ApiController
                     }
                     $day = $date->copy()->timezone('Asia/Shanghai')->toDateString();
                     $row = [
-                        'id' => (string) $g->id, 'uuid' => $g->uuid, 'room_id' => $g->room_id,
-                        'hand_number' => $g->hand_number, 'profit' => (int) $g->profit,
-                        'invested' => (int) $g->invested, 'awarded' => (int) $g->awarded,
-                        'points_cost' => $g->solves->sum('cost'), 'ended_at' => $date->toIso8601String(),
+                        'id' => (string) $g->id, 'uuid' => $g->uuid, 'room_id' => $g->room_number,
+                        'hand_number' => $g->hand_number, 'profit' => (float) $g->profit,
+                        'invested' => (float) $g->bet_amount, 'awarded' => (float) $g->winnings,
+                        'ended_at' => $date->toIso8601String(),
                         'date' => $day, 'status' => 'settled',
                     ];
                     $life['hands']++;
                     $life['wins'] += (int) ($g->profit >= 0);
-                    $life['invested'] += $g->invested;
+                    $life['invested'] += $g->bet_amount;
                     $life['profit'] += $g->profit;
                     if ($day >= $start && $day <= $end) {
                         $rows[] = $row;
                         $range['hands']++;
                         $range['wins'] += (int) ($g->profit >= 0);
-                        $range['invested'] += $g->invested;
+                        $range['invested'] += $g->bet_amount;
                         $range['profit'] += $g->profit;
                     }
                 }

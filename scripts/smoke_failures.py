@@ -12,9 +12,8 @@ def prepare(ws):
     solve=timeline[7];solve['id']=str(uuid.uuid4());solve['payload']['hand_id']=game
     return game,solve
 one,solve1=prepare(a);two,solve2=prepare(b)
-# Other live writer may not write the first game.
-conflict=json.loads(json.dumps(solve1));conflict['id']=str(uuid.uuid4());b.send(conflict);assert b.recv()['payload']['code']=='game_in_use'
-a.send(solve1);b.send(solve2)
+# A second authenticated connection may continue the same user's game.
+b.send(solve1);a.send(solve2)
 out=[]
 for ws in [a,b]:
     assert ws.recv()['type']=='event_ack'
@@ -31,7 +30,7 @@ api('GET','/api/mine/games/detail',{'game_id':one},other_token,expected='not_fou
 w=WebSocket();w.auth(other_token);w.send(solve1);assert w.recv()['payload']['code']=='hand_not_started';w.close()
 # Invalid JSON causes a safe error without crashing the listener.
 a.send_frame(b'{broken');assert a.recv()['type']=='error'
-ping={'id':str(uuid.uuid4()),'type':'heatbeat_ping','payload':{'timestamp':123}};a.send(ping);assert a.recv()['type']=='heatbeat_pong'
+ping={'id':str(uuid.uuid4()),'type':'heatbeat_ping','timestamp':int(time.time()*1000),'payload':{'timestamp':123}};a.send(ping);assert a.recv()['type']=='heatbeat_pong'
 # A newer real action invalidates the in-flight recommendation and releases its reservation.
 command('credit:grant',name,'1','--id='+str(uuid.uuid4()))
 third,solve3=prepare(a)
@@ -48,4 +47,4 @@ try:
     b.send(ping);message=b.recv();assert message['type']=='error' and message['payload']['code']=='auth_expired'
 except (EOFError,OSError):pass
 b.close();a.close()
-print(json.dumps({'result':'passed','scenarios':['live_owner_isolation','last_credit_contention','duplicate_no_charge','conflicting_replay','cross_user_http','cross_user_ws','malformed_frame','revoked_socket','new_fact_invalidates_pending']}))
+print(json.dumps({'result':'passed','scenarios':['same_user_continuation','last_credit_contention','duplicate_no_charge','conflicting_replay','cross_user_http','cross_user_ws','malformed_frame','revoked_socket','new_fact_invalidates_pending']}))

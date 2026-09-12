@@ -19,9 +19,10 @@ final class UserCreateCommand extends Command
         if (! $password || strlen($password) < 10 || strlen($account) > 64 || $account === '') {
             return self::FAILURE;
         }
+        $nickname = ($this->input ?? throw new LogicException('Command input unavailable'))->getOption('nickname');
         User::query()->create([
             'account' => $account,
-            'nickname' => ($this->input ?? throw new LogicException('Command input unavailable'))->getOption('nickname') ?? $account,
+            'nickname' => $nickname,
             'password' => $password,
         ]);
         $this->info('Account created');

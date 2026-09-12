@@ -13,7 +13,7 @@ app/
   Exception/        业务异常，Handler/ 统一处理
   Service/          跨入口复用的游戏持久化、TOTP 逻辑
   Command/          账户创建、人工积分发放
-  Process/          待保存数据恢复进程
+  Process/          超时牌局处理进程
   Listener/         服务生命周期监听
   Enum/             PHP 原生枚举
   Vo/Game/          游戏上下文及子值对象
@@ -41,7 +41,7 @@ php bin/hyperf.php start
 
 Provider配置在config/autoload/poker.php，使用poker.default、poker.proto、poker.mock。Proto网络为WE；真实域名与token仅放.env。POKER_PROVIDER=mock用于本地模拟。
 
-MySQL和Redis使用Hyperf协程连接池。Redis建议AOF和noeviction；数据库必须支持事务。实时上下文、幂等操作及预占通过同用户hash tag下的Lua CAS原子更新。结束或求解终态触发独立落库协程，事务成功才清理匹配快照；恢复进程自动重试。进程重启可以恢复Redis待保存数据，Redis完全丢失不能还原未入库事实。
+MySQL和Redis使用Hyperf协程连接池。实时上下文、幂等操作及积分预占通过同用户 hash tag 下的 Lua CAS 原子更新。每条合法游戏事件在返回 `event_ack` 前直接写入 MySQL 事务；求解完成后也立即写入求解结果和积分流水。Redis不保存连接、Token 活跃状态、通信日志或待归档队列。
 
 ## 账户与积分
 
@@ -65,7 +65,7 @@ python3 scripts/smoke_up.py
 python3 scripts/smoke_restart.py
 ```
 
-smoke_up启动实际服务并在结束后关闭所创建进程，覆盖20个HTTP接口、22个游戏事件、积分/VIP、9个异常场景、7个第三方协议场景及7个TCP/TLS场景。smoke_restart使用19480/19481端口，在求解等待时结束自身进程组并重启，验证预占释放与中断牌局落库。脚本需要测试端口空闲，以及可用的MySQL、Redis和openssl。
+smoke_up启动实际服务并在结束后关闭所创建进程，覆盖公开 HTTP 接口、22个游戏事件、积分/VIP、异常场景、第三方协议场景及TCP/TLS场景。smoke_restart使用19480/19481端口，在求解等待时结束自身进程组并重启，验证预占释放与中断牌局落库。脚本需要测试端口空闲，以及可用的MySQL、Redis和openssl。
 
 真实Proto检查：`php scripts/smoke_provider.php --expect=provider_rejected`。当前WSS/TLS/认证正常，样例仍被上游以“翻牌前下注未完成”拒绝；该命令验证明确失败路径，不代表真实求解成功。
 

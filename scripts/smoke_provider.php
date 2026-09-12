@@ -1,8 +1,9 @@
 <?php
 
 require __DIR__.'/bootstrap.php';
+
+use App\Game\Providers\ProtoProvider;
 use App\Game\Reducer;
-use App\Poker\Providers\ProtoProvider;
 use Hyperf\Stringable\Str;
 use Swoole\Coroutine;
 use Swoole\Timer;
@@ -31,7 +32,7 @@ $report = null;
     foreach (array_slice($events, 0, 8) as $e) {
         if ($e['seq'] > 1) {
             $e['payload']['hand_id'] = $uuid;
-        }if ($e['type'] === 'game_get_solve') {
+        }if ($e['type'] === 'game_request_action') {
             $e['payload']['delay'] = 5000;
         }$c = $reducer->apply($c, $e);
         $contexts[] = $c;
@@ -54,7 +55,12 @@ $report = null;
     try {
         $provider->start($contexts[0]);
         $provider->stageStarted($contexts[1]);
-        Timer::after(isset($options['fixture']) ? 1200 : 1, fn () => $provider->getSolve($contexts[7], $finish));
+        $provider->playerActed($contexts[2]);
+        $provider->playerActed($contexts[3]);
+        $provider->playerActed($contexts[4]);
+        $provider->stageStarted($contexts[5]);
+        $provider->playerActed($contexts[6]);
+        Timer::after(isset($options['fixture']) ? 1200 : 1, fn () => $provider->requestAction($contexts[7], $finish));
         while ($report === null) {
             Coroutine::sleep(0.01);
         }

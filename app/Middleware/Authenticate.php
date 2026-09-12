@@ -5,8 +5,8 @@ declare(strict_types=1);
 namespace App\Middleware;
 
 use App\Exception\AuthException;
-use App\Model\PersonalAccessToken;
 use App\Model\User;
+use App\Model\UserToken;
 use Hyperf\Context\Context;
 use Hyperf\Contract\TranslatorInterface;
 use Hyperf\HttpMessage\Exception\HttpException;
@@ -40,14 +40,13 @@ final readonly class Authenticate implements MiddlewareInterface
             throw AuthException::authRequired();
         }
         $plain = $parts[1].'|'.$parts[2];
-        $token = PersonalAccessToken::query()->find((int) $parts[1]);
+        $token = UserToken::query()->find((int) $parts[1]);
         if (! $token || ! hash_equals($token->token, hash('sha256',
-            $parts[2])) || ($token->expires_at && $token->expires_at->isPast()) || $this->redis->exists('revoked:'.hash('sha256',
-                $plain))) {
+            $parts[2])) || ($token->expires_at && $token->expires_at->isPast())) {
             throw AuthException::authRequired();
         }
-        $user = User::query()->find($token->tokenable_id);
-        if (! $user || ! $user->status->isNormal() || $this->redis->exists('denied:'.$user->id)) {
+        $user = User::query()->find($token->user_id);
+        if (! $user || ! $user->status->isNormal()) {
             throw AuthException::authRequired();
         }
         $this->limit('api:'.$user->id, 120);

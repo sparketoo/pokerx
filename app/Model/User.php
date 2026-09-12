@@ -51,12 +51,9 @@ class User extends Model
         $this->attributes['two_factor_secret'] = $value === null ? null : di(Encrypter::class)->encryptString($value);
     }
 
-    /** @return HasMany<PersonalAccessToken, static> */
+    /** @return HasMany<UserToken, static> */
     public function tokens(): HasMany
     {
-        $relation = $this->hasMany(PersonalAccessToken::class, 'tokenable_id');
-        $relation->whereIn('tokenable_type', [self::class, 'App\\Models\\User']);
-
-        return $relation;
+        return $this->hasMany(UserToken::class, 'user_id');
     }
 }
