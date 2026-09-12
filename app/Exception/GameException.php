@@ -11,4 +11,19 @@ final class GameException extends AppException
     {
         return self::create(__FUNCTION__)->withDetails($details);
     }
+
+    public static function heroNotFound(): self
+    {
+        return self::create(__FUNCTION__);
+    }
+
+    public static function invalidPlayerActed(): self
+    {
+        return self::create(__FUNCTION__);
+    }
+
+    public static function invalidGameOver(): self
+    {
+        return self::create(__FUNCTION__);
+    }
 }

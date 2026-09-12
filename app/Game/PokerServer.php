@@ -5,7 +5,9 @@ declare(strict_types=1);
 namespace App\Game;
 
 use App\Constants\GameEvent;
+use App\Enum\ActionEnum;
 use App\Enum\SeatTypeEnum;
+use App\Enum\StageEnum;
 use App\Exception\AppException;
 use App\Exception\AuthException;
 use App\Exception\GatewayException;
@@ -121,10 +123,6 @@ final class PokerServer implements OnCloseInterface, OnMessageInterface, OnOpenI
         if (! method_exists($this, $method)) {
             throw GatewayException::eventInvalid();
         }
-        if ($type !== GameEvent::GAME_START && empty($message['payload']['game_uuid'])) {
-            throw GatewayException::eventInvalid();
-        }
-
         $message = new PokerServerMessageVo(
             $fd,
             $this->connection($fd)->user,
@@ -183,6 +181,12 @@ final class PokerServer implements OnCloseInterface, OnMessageInterface, OnOpenI
 
     public function handleGameStage(PokerServerMessageVo $message): Game
     {
+        $this->validatePayload($message->payload, [
+            ...$this->gameUuidRules(),
+            'stage' => ['required', 'string', 'in:'.$this->stageValues()],
+            'cards' => ['required', 'array', 'list', 'max:5'],
+            'cards.*' => ['required', 'string', 'max:3'],
+        ]);
         $game = $this->append($message);
         $this->providerFor($game)->stage($game);
 
@@ -191,6 +195,12 @@ final class PokerServer implements OnCloseInterface, OnMessageInterface, OnOpenI
 
     public function handleGamePlayActed(PokerServerMessageVo $message): Game
     {
+        $this->validatePayload($message->payload, [
+            ...$this->gameUuidRules(),
+            'name' => ['required', 'string', 'max:64'],
+            'action' => ['required', 'string', 'in:'.$this->actionValues()],
+            'amount' => ['required', 'numeric', 'decimal:0,4', 'min:0', 'max:9999999999.9999'],
+        ]);
         $game = $this->append($message);
         $this->providerFor($game)->playerActed($game);
 
@@ -199,6 +209,12 @@ final class PokerServer implements OnCloseInterface, OnMessageInterface, OnOpenI
 
     public function handleGameKnownPlayCards(PokerServerMessageVo $message): Game
     {
+        $this->validatePayload($message->payload, [
+            ...$this->gameUuidRules(),
+            'name' => ['required', 'string', 'max:64'],
+            'cards' => ['required', 'array', 'list', 'size:2'],
+            'cards.*' => ['required', 'string', 'max:3'],
+        ]);
         $game = $this->append($message);
         $this->providerFor($game)->knownPlayerCards($game);
 
@@ -207,6 +223,7 @@ final class PokerServer implements OnCloseInterface, OnMessageInterface, OnOpenI
 
     public function handleGameRequestAction(PokerServerMessageVo $message): Game
     {
+        $this->validatePayload($message->payload, $this->gameUuidRules());
         $game = $this->append($message);
         $this->providerFor($game)->requestAction($game,
             function (RequestActionResultVo $result) use ($message, $game) {
@@ -226,6 +243,17 @@ final class PokerServer implements OnCloseInterface, OnMessageInterface, OnOpenI
 
     public function handleGameOver(PokerServerMessageVo $message): Game
     {
+        $this->validatePayload($message->payload, [
+            ...$this->gameUuidRules(),
+            'winner' => ['required', 'array'],
+            'winner.name' => ['required', 'string', 'max:64'],
+            'winner.amount' => ['required', 'numeric', 'decimal:0,4', 'min:0', 'max:9999999999.9999'],
+            'shown' => ['sometimes', 'array', 'list'],
+            'shown.*' => ['required', 'array'],
+            'shown.*.name' => ['required', 'string', 'max:64'],
+            'shown.*.cards' => ['required', 'array', 'list', 'size:2'],
+            'shown.*.cards.*' => ['required', 'string', 'max:3'],
+        ]);
         $game = $this->append($message);
         $this->providerFor($game)->over($game);
 
@@ -302,5 +330,30 @@ final class PokerServer implements OnCloseInterface, OnMessageInterface, OnOpenI
     private function providerFor(Game $game): ProviderInterface
     {
         return $this->poker->provider($game->provider);
+    }
+
+    /**
+     * @param  array<string, mixed>  $payload
+     * @param  array<string, list<string>>  $rules
+     */
+    private function validatePayload(array $payload, array $rules): void
+    {
+        $this->validatorFactory->make($payload, $rules)->validate();
+    }
+
+    /** @return array<string, list<string>> */
+    private function gameUuidRules(): array
+    {
+        return ['game_uuid' => ['required', 'uuid']];
+    }
+
+    private function actionValues(): string
+    {
+        return implode(',', array_map(static fn (ActionEnum $action): string => $action->wire(), ActionEnum::cases()));
+    }
+
+    private function stageValues(): string
+    {
+        return implode(',', array_map(static fn (StageEnum $stage): string => strtolower($stage->name), StageEnum::cases()));
     }
 }

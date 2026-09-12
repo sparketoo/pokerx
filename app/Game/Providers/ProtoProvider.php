@@ -128,7 +128,7 @@ final class ProtoProvider extends SocketJsonProvider
         $requested = $synced && $this->send([
             'structType' => 'getAnswer',
             'gameId' => $game->uuid,
-            'potForAlpha' => $game->getAllPot(),
+            'potForAlpha' => $game->pot,
             'delay' => (int) ($this->options['delay'] ?? 9000),
         ]);
         if (! $requested) {
@@ -136,7 +136,7 @@ final class ProtoProvider extends SocketJsonProvider
 
             return;
         }
-        $this->logger()->info('Proto solve request dispatched', ['game_id' => $game->uuid, 'pot' => $game->getAllPot()]);
+        $this->logger()->info('Proto solve request dispatched', ['game_id' => $game->uuid, 'pot' => $game->pot]);
     }
 
     protected function onError(Throwable $error): void

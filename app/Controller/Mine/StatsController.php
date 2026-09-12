@@ -42,7 +42,7 @@ class StatsController extends ApiController
         } else {
             $v = DB::transaction(function () use ($user, $start, $end, $a, $b) {
                 /** @var Collection<int, Game> $all */
-                $all = Game::query()->where('user_id', $user)->where('status', 'SETTLED')->with([
+                $all = Game::query()->where('user_id', $user)->where('status', 'CLOSED')->with([
                     'events' => fn ($q) => $q->where('type', 'game_over'),
                 ])->orderBy('id')->get();
                 $rows = [];
@@ -59,7 +59,7 @@ class StatsController extends ApiController
                         'hand_number' => $g->hand_number, 'profit' => (float) $g->profit,
                         'invested' => (float) $g->bet_amount, 'awarded' => (float) $g->winnings,
                         'ended_at' => $date->toIso8601String(),
-                        'date' => $day, 'status' => 'settled',
+                        'date' => $day, 'status' => 'closed',
                     ];
                     $life['hands']++;
                     $life['wins'] += (int) ($g->profit >= 0);
@@ -136,7 +136,7 @@ class StatsController extends ApiController
         } else {
             $v = DB::transaction(function () use ($user, $start, $end, $a, $b) {
                 /** @var Collection<int, Game> $all */
-                $all = Game::query()->where('user_id', $user)->where('status', 'SETTLED')->with([
+                $all = Game::query()->where('user_id', $user)->where('status', 'CLOSED')->with([
                     'events' => fn ($q) => $q->where('type', 'game_over'),
                 ])->orderBy('id')->get();
                 $rows = [];
@@ -153,7 +153,7 @@ class StatsController extends ApiController
                         'hand_number' => $g->hand_number, 'profit' => (float) $g->profit,
                         'invested' => (float) $g->bet_amount, 'awarded' => (float) $g->winnings,
                         'ended_at' => $date->toIso8601String(),
-                        'date' => $day, 'status' => 'settled',
+                        'date' => $day, 'status' => 'closed',
                     ];
                     $life['hands']++;
                     $life['wins'] += (int) ($g->profit >= 0);

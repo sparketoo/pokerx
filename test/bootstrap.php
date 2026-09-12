@@ -26,6 +26,7 @@ foreach ([
     'APP_ENV' => 'testing',
     'DB_DATABASE' => 'pokerx_hyperf_test',
     'REDIS_PREFIX' => 'pokerx_hyperf_test:',
+    'REDIS_PORT' => '6379',
 ] as $key => $value) {
     putenv($key.'='.$value);
     $_ENV[$key] = $value;

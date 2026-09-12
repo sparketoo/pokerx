@@ -44,7 +44,7 @@ final class PokerManager
         }
         $config = config("poker.{$name}", []);
         if (isset($this->creators[$name])) {
-            $this->providers[$name] = $this->creators[$name]($config);
+            return $this->providers[$name] = $this->creators[$name]($config);
         }
 
         $method = 'create'.Str::studly($name).'Provider';

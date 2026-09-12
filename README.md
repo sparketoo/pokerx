@@ -219,7 +219,7 @@ next_cursor 为加密游标，不可自行解析、修改或跨账号使用。
       "pending":[]
     }
 
-snapshot 模式读取统计快照，返回 items、snapshot、next_cursor。当前牌局在 game_over 后进入 CLOSED；SETTLED 结算未实现，因此新牌局不会被统计快照计算。
+snapshot 模式读取统计快照，返回 items、snapshot、next_cursor。game_over 后牌局进入 CLOSED，并以已写入的 winnings、bet_amount、profit 参与统计快照计算；本项目不使用 SETTLED 作为额外状态。
 
 #### GET /api/mine/games/detail?game_id=<UUID>
 
@@ -555,7 +555,7 @@ action 可为 fold、check、call、bet、raise、all-in。只有这个事件会
       }
     }
 
-game_uuid 必填；其他字段当前原样写入事件 payload。成功后状态从 OPEN 变为 CLOSED，回执为 game_over.ack。收益计算、结算金额及 SETTLED 状态尚未实现。
+game_uuid、winner.name、winner.amount 必填；shown 可选，出现时每项均须含 name 和两张 cards。成功后状态从 OPEN 变为 CLOSED（不会进入 SETTLED）；若 winner 是 Hero，则 winnings 为 winner.amount，否则为 0；profit = winnings - bet_amount。回执为 game_over.ack。
 
 ### Provider 连接模型
 

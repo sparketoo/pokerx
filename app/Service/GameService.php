@@ -47,23 +47,11 @@ final class GameService
                 $this->creditService->consume($user, 1, 'poker', $uuid);
             }
 
-            $game = Game::query()->create([
-                'uuid' => $uuid,
-                'user_id' => $user->id,
-                'room_number' => $roomNumber,
-                'hand_number' => $handNumber,
-                'provider' => $provider,
-                'game_type' => $gameType,
-                'big_blind' => $bigBlind,
-                'small_blind' => $smallBlind,
-                'ante' => $ante,
-            ]);
-
-            $players = collect($players)->map(function (array $player) use ($game) {
+            $players = collect($players)->map(function (array $player) use ($smallBlind, $bigBlind) {
                 $seatType = SeatTypeEnum::fromNameOrFail($player['seat_type']);
                 $blindAmount = match ($seatType) {
-                    SeatTypeEnum::BB => $game->big_blind,
-                    SeatTypeEnum::SB => $game->small_blind,
+                    SeatTypeEnum::BB => $bigBlind,
+                    SeatTypeEnum::SB => $smallBlind,
                     default => 0
                 };
 
@@ -77,6 +65,33 @@ final class GameService
                     'cards' => $player['cards'] ?? [],
                 ];
             });
+            $hero = $players->firstWhere('is_hero', true);
+            if (empty($hero)) {
+                throw GameException::heroNotFound();
+            }
+
+            $betAmount = match ($hero['seat_type']) {
+                SeatTypeEnum::BB => $bigBlind,
+                SeatTypeEnum::SB => $smallBlind,
+                default => 0
+            };
+
+            $totalBlinds = (float) $players->sum('blind_amount');
+            $game = Game::query()->create([
+                'uuid' => $uuid,
+                'user_id' => $user->id,
+                'room_number' => $roomNumber,
+                'hand_number' => $handNumber,
+                'provider' => $provider,
+                'game_type' => $gameType,
+                'big_blind' => $bigBlind,
+                'small_blind' => $smallBlind,
+                'ante' => $ante,
+                // 我的投注金额
+                'bet_amount' => $ante + $betAmount,
+                // 总池
+                'pot' => $ante * $players->count() + $totalBlinds,
+            ]);
 
             $game->players()->createMany($players->toArray());
             $game->events()->create([
@@ -119,7 +134,20 @@ final class GameService
                 'type' => $type,
                 'payload' => $payload,
             ]);
+            if ($type === GameEvent::GAME_PLAY_ACTED) {
+                $amount = $this->actedAmount($payload);
+                $game->pot = round($game->pot + $amount, 4);
+
+                /** @var string $heroName */
+                $heroName = $this->heroName($game);
+                if (($payload['name'] ?? null) === $heroName) {
+                    $game->bet_amount = round($game->bet_amount + $amount, 4);
+                }
+                $game->saveOrFail();
+            }
             if ($type === GameEvent::GAME_OVER && $game->status->isOpen()) {
+                $game->winnings = $this->winningsFor($game, $payload);
+                $game->profit = round($game->winnings - $game->bet_amount, 4);
                 $game->status = GameStatusEnum::CLOSED;
                 $game->saveOrFail();
             }
@@ -137,5 +165,37 @@ final class GameService
             ->where('room_number', $roomNumber)
             ->where('hand_number', $handNumber)
             ->exists();
+    }
+
+    /** @param array<string, mixed> $payload */
+    private function actedAmount(array $payload): float
+    {
+        $amount = $payload['amount'] ?? null;
+        if (! is_numeric($amount) || (float) $amount < 0) {
+            throw GameException::invalidPlayerActed();
+        }
+
+        return round((float) $amount, 4);
+    }
+
+    /** @param array<string, mixed> $payload */
+    private function winningsFor(Game $game, array $payload): float
+    {
+        $winner = $payload['winner'] ?? null;
+        $amount = is_array($winner) ? $winner['amount'] ?? null : null;
+        if (! is_array($winner) || ! is_string($winner['name'] ?? null) || ! is_numeric($amount) || (float) $amount < 0) {
+            throw GameException::invalidGameOver();
+        }
+
+        return $winner['name'] === $this->heroName($game) ? round((float) $amount, 4) : 0.0;
+    }
+
+    private function heroName(Game $game): string
+    {
+        $name = $game->players()
+            ->where('is_hero', true)
+            ->value('name');
+
+        return is_string($name) ? $name : throw GameException::heroNotFound();
     }
 }

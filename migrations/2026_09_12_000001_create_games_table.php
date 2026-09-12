@@ -13,7 +13,7 @@ return new class extends Migration
             $t->id();
             $t->uuid('uuid')->unique()->comment('游戏UUID');
             $t->foreignId('user_id')->constrained();
-            $t->string('game_type', 32)->after('provider');
+            $t->string('game_type', 32)->comment('游戏类型');
             $t->string('room_number', 64)->comment('房间号');
             $t->unsignedInteger('hand_number')->comment('第几手');
             $t->string('provider', 32)->comment('服务商');
@@ -21,9 +21,10 @@ return new class extends Migration
             $t->decimal('small_blind', 14, 4)->unsigned()->comment('小盲注');
             $t->decimal('ante', 14, 4)->default(0)->comment('前注');
             $t->enum('status', GameStatusEnum::names())->default(GameStatusEnum::OPEN->name)->comment('游戏状态');
-            $t->decimal('bet_amount', 14, 4)->unsigned()->nullable()->comment('投注金额');
-            $t->decimal('winnings', 14, 4)->nullable()->comment('赢得奖金');
+            $t->decimal('bet_amount', 14, 4)->unsigned()->comment('投注金额');
+            $t->decimal('winnings', 14, 4)->unsigned()->default(0)->comment('赢得奖金');
             $t->decimal('profit', 14, 4)->nullable()->comment('游戏收益：投注-奖金');
+            $t->decimal('pot', 14, 4)->unsigned()->default(0)->comment('总池，包含所有人前注、大小盲及所有下注');
             $t->index(['user_id', 'room_number', 'hand_number']);
             $t->index(['user_id', 'created_at', 'id']);
             $t->index(['user_id', 'status']);
