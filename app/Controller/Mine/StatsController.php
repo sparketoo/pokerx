@@ -83,7 +83,11 @@ class StatsController extends ApiController
                 $range['wins'] += (int) ($profit >= 0);
                 $range['invested'] += $game->bet_amount;
                 $range['profit'] += $profit;
-                $rows[] = ['uuid' => $game->uuid, 'day' => $day, 'profit' => $profit];
+                $rows[] = [
+                    'label' => $endedAt->copy()->timezone('Asia/Shanghai')->format('Y-m-d H:i'),
+                    'day' => $day,
+                    'profit' => $profit,
+                ];
             }
         }
 
@@ -99,7 +103,7 @@ class StatsController extends ApiController
     }
 
     /**
-     * @param  list<array{uuid: string, day: string, profit: float}>  $rows
+     * @param  list<array{label: string, day: string, profit: float}>  $rows
      * @return list<array{label: string, delta: float, cumulative: float}>
      */
     private function trendRows(array $rows, Date $start, Date $end): array
@@ -110,7 +114,7 @@ class StatsController extends ApiController
         if ($days === 1) {
             foreach ($rows as $row) {
                 $cumulative += $row['profit'];
-                $trend[] = ['label' => $row['uuid'], 'delta' => $row['profit'], 'cumulative' => $cumulative];
+                $trend[] = ['label' => $row['label'], 'delta' => $row['profit'], 'cumulative' => $cumulative];
             }
 
             return $trend;

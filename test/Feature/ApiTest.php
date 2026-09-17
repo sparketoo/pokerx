@@ -71,7 +71,8 @@ final class ApiTest extends HttpTestCase
             TestData::players($game);
             TestData::event($game, GameEvent::HAND_START, ['room_number' => $game->room_number]);
             TestData::event($game, GameEvent::PLAYER_ACTED, ['name' => 'Hero', 'action' => 'call', 'amount' => 100]);
-            TestData::event($game, GameEvent::HAND_OVER, ['winnings' => 250]);
+            $handOver = TestData::event($game, GameEvent::HAND_OVER, ['winnings' => 250]);
+            $handOver->update(['created_at' => '2026-09-17 10:42:00.000000']);
 
             return $game;
         });
@@ -91,7 +92,10 @@ final class ApiTest extends HttpTestCase
             'cursor' => $firstEventPage['data']['next_cursor'],
         ], $headers));
         $summary = $this->apiRequest(fn () => $this->get('/api/mine/stats/summary', [], $headers));
-        $trend = $this->apiRequest(fn () => $this->get('/api/mine/stats/trend', [], $headers));
+        $trend = $this->apiRequest(fn () => $this->get('/api/mine/stats/trend', [
+            'start' => '2026-09-17',
+            'end' => '2026-09-17',
+        ], $headers));
 
         self::assertSame(['credit_balance' => 1050], $credit['data']);
         self::assertNotEmpty($records['data']['items']);
@@ -104,6 +108,7 @@ final class ApiTest extends HttpTestCase
         self::assertCount(1, $secondEventPage['data']['items']);
         self::assertNotSame($firstEventPage['data']['items'][0]['id'], $secondEventPage['data']['items'][0]['id']);
         self::assertSame(['hands' => 1, 'wins' => 1, 'invested' => 150, 'profit' => 100, 'win_rate' => 1], $summary['data']['lifetime']);
+        self::assertSame([['label' => '2026-09-17 18:42', 'delta' => 100, 'cumulative' => 100]], $trend['data']['items']);
         self::assertArrayHasKey('as_of', $summary['data']);
         self::assertArrayHasKey('as_of', $trend['data']);
     }
