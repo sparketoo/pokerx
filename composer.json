@@ -88,7 +88,7 @@
         "post-autoload-dump": [
             "rm -rf runtime/container"
         ],
-        "test": "@php vendor/bin/pest --test-directory=test",
+        "test": "XDEBUG_MODE=off php vendor/bin/pest --test-directory=test",
         "pint": "pint",
         "phpstan": "phpstan analyse --memory-limit 300M",
         "lint": [

@@ -326,7 +326,11 @@ it('returns the provider action in the request_action acknowledgement', function
             ->and($game->winnings)->toBe(547)
             ->and($game->profit)->toBe(397)
             ->and($game->events()->count())->toBe(6);
-        ($provider->settlementError)('upstream settlement rejected');
+        $settlementError = $provider->settlementError;
+        if ($settlementError === null) {
+            throw new \LogicException('Settlement error callback was not registered.');
+        }
+        $settlementError('upstream settlement rejected');
         expect($sender->messages)->toHaveCount(7)
             ->and($sender->messages[6]['message']['type'])->toBe('hand_over.error')
             ->and($sender->messages[6]['message']['reply_to'])->toBeNull()
@@ -336,7 +340,7 @@ it('returns the provider action in the request_action acknowledgement', function
             ]);
         $server->onClose($swoole, 92, 0);
         $server->onOpen($swoole, websocketOpenRequest(92, $token));
-        ($provider->settlementError)('late failure for closed connection');
+        $settlementError('late failure for closed connection');
         expect($sender->messages)->toHaveCount(7);
 
     });

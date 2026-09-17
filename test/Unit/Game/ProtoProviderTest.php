@@ -12,6 +12,7 @@ use App\Model\Game;
 use App\Model\GamePlayer;
 use App\Vo\Game\RequestActionResultVo;
 use Hyperf\Context\ApplicationContext;
+use Hyperf\Contract\ContainerInterface;
 use Hyperf\Database\Model\Collection;
 use Hyperf\WebSocketClient\Client;
 use Psr\Log\AbstractLogger;
@@ -69,6 +70,7 @@ it('rejects invalid advice immediately instead of leaving the request pending', 
     [['action' => 'call', 'amount' => 'not-a-number']],
 ]);
 
+/** @param array<mixed> $shown */
 function settlementGame(array $shown): Game
 {
     $game = new Game(['id' => 12345, 'uuid' => '832d5fc3-98bc-4e02-b8f2-d2bff2c51ea4', 'network' => NetworkEnum::OK, 'big_blind' => 2, 'ante' => 0, 'created_at' => '2026-09-17 15:13:08']);
@@ -168,6 +170,7 @@ it('logs each upstream frame once including authentication without retaining sec
         $original = $container->get(LoggerInterface::class);
         $logger = new class extends AbstractLogger
         {
+            /** @var list<array{message: string, context: array<string, mixed>}> */
             public array $records = [];
 
             public function log($level, string|Stringable $message, array $context = []): void
@@ -175,6 +178,9 @@ it('logs each upstream frame once including authentication without retaining sec
                 $this->records[] = ['message' => (string) $message, 'context' => $context];
             }
         };
+        if (! $container instanceof ContainerInterface) {
+            throw new \LogicException('The application container must support test bindings.');
+        }
         $container->set(LoggerInterface::class, $logger);
         $provider = connectedSettlementProvider();
         try {
@@ -183,7 +189,7 @@ it('logs each upstream frame once including authentication without retaining sec
             $frames = array_values(array_filter($logger->records, fn (array $record): bool => $record['message'] === 'Proto frame'));
             expect($frames)->toHaveCount(2);
             $encoded = json_encode($logger->records, JSON_THROW_ON_ERROR);
-            expect($encoded)->not->toContain('secret-token')->not->toContain('secret-session')->not->toContain('nested-secret');
+            expect($encoded)->not()->toContain('secret-token')->not()->toContain('secret-session')->not()->toContain('nested-secret');
             expect($frames[0]['context']['sent'])->toBeTrue()
                 ->and($frames[0]['context']['message']['token'])->toBe('[redacted]')
                 ->and($frames[1]['context']['message']['result'])->toBeTrue();

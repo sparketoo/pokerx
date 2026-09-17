@@ -24,6 +24,7 @@ final class CallbackProvider extends SocketProvider
         $this->callRequestActionCallback($gameId, $result);
     }
 
+    /** @var list<array{string, int}> */
     public array $dataFrames = [];
 
     protected function onData(string $data, int $opcode): void

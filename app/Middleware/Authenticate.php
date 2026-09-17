@@ -24,6 +24,9 @@ final readonly class Authenticate implements MiddlewareInterface
         $path = $request->getUri()->getPath();
         if (str_starts_with($path, '/api/')) {
             $ip = (string) ($request->getServerParams()['remote_addr'] ?? 'unknown');
+            if ($path === '/api/health') {
+                return $handler->handle($request);
+            }
             if ($path === '/api/auth/login') {
                 $this->limit('login:'.$ip, 10);
                 $input = $request->getParsedBody();

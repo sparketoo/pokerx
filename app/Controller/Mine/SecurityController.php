@@ -81,9 +81,9 @@ class SecurityController extends ApiController
         /** @var User $user */
         $user = User::query()->findOrFail($this->user($request)->id);
         if ($user->two_factor_secret === null) {
-            throw AuthException::twoFactorRequired();
+            return $this->success();
         }
-        if (! password_verify($request->currentPassword(), $user->password)) {
+        if (! password_verify($request->currentPassword() ?? '', $user->password)) {
             throw AuthException::authFailed();
         }
         $this->verifyCode($user, $request->code());
