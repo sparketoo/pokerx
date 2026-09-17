@@ -19,5 +19,5 @@ interface ProviderInterface
 
     public function requestAction(Game $game, Closure $callback): void;
 
-    public function over(Game $game): void;
+    public function over(Game $game, ?Closure $onError = null): void;
 }

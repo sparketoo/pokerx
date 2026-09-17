@@ -7,6 +7,7 @@ use App\Enum\GameStatusEnum;
 use App\Enum\NetworkEnum;
 use App\Exception\CreditException;
 use App\Exception\GameException;
+use App\Exception\GatewayException;
 use App\Game\PokerManager;
 use App\Model\CreditRecord;
 use App\Model\Event;
@@ -61,7 +62,7 @@ it('creates games with their first event and closes them when hand_over arrives'
             'name' => 'Villain', 'action' => 'call', 'amount' => 75,
         ]);
         $closed = $service->append($user, $game->uuid, (string) Str::uuid(), GameEvent::HAND_OVER, [
-            'winner' => ['name' => 'Hero', 'amount' => 300],
+            'winners' => [['name' => 'Hero', 'amount' => 300]],
         ]);
 
         expect($game->provider)->toBe((new PokerManager)->getDefaultProvider())
@@ -112,7 +113,7 @@ it('upserts an authoritative hand refresh by its network, room and hand', functi
                 ['type' => GameEvent::FORCE_BET, 'payload' => ['small_blind' => 50, 'big_blind' => 100]],
                 ['type' => GameEvent::HAND_CARD, 'payload' => ['cards' => ['As', 'Qd']]],
                 ['type' => GameEvent::PLAYER_ACTED, 'payload' => ['name' => 'Hero', 'action' => 'raise', 'amount' => 200]],
-                ['type' => GameEvent::HAND_OVER, 'payload' => ['winner' => ['name' => 'Hero', 'amount' => 350]]],
+                ['type' => GameEvent::HAND_OVER, 'payload' => ['winners' => [['name' => 'Villain', 'amount' => 174], ['name' => 'Hero', 'amount' => 176]]]],
             ],
             NetworkEnum::WE,
         );
@@ -124,8 +125,55 @@ it('upserts an authoritative hand refresh by its network, room and hand', functi
             ->and($second->status)->toBe(GameStatusEnum::CLOSED)
             ->and($second->pot)->toBe(350)
             ->and($second->bet_amount)->toBe(250)
-            ->and($second->winnings)->toBe(350)
-            ->and($second->profit)->toBe(100)
+            ->and($second->winnings)->toBe(176)
+            ->and($second->profit)->toBe(-74)
             ->and(Event::query()->where('game_id', $second->id)->orderBy('seq')->pluck('seq')->all())->toBe([1, 2, 3, 4, 5]);
     });
 });
+
+it('calculates only the Hero share and rejects a second settlement', function (array $winners, int $expected): void {
+    run(function () use ($winners, $expected): void {
+        $user = TestData::user();
+        $game = TestData::game($user);
+        TestData::players($game);
+        $game->players()->create(['seat' => 3, 'name' => 'Third', 'is_hero' => false, 'stack' => 1000, 'seat_type' => 'BTN', 'blind_amount' => 0, 'cards' => []]);
+        TestData::event($game, GameEvent::HAND_CARD, ['cards' => ['As', 'Qd']]);
+        $service = new GameService(new CreditService, new PokerManager);
+        $payload = ['winners' => $winners];
+        $closed = $service->append($user, $game->uuid, (string) Str::uuid(), GameEvent::HAND_OVER, $payload);
+        expect($closed->winnings)->toBe($expected)
+            ->and($closed->profit)->toBe($expected - 50)
+            ->and($closed->status)->toBe(GameStatusEnum::CLOSED)
+            ->and($closed->events()->where('type', GameEvent::HAND_OVER)->firstOrFail()->payload)->toBe($payload);
+        expect(fn () => $service->append($user, $game->uuid, (string) Str::uuid(), GameEvent::HAND_OVER, $payload))->toThrow(GatewayException::class);
+        expect($game->events()->where('type', GameEvent::HAND_OVER)->count())->toBe(1);
+    });
+})->with([
+    [[['name' => 'Hero', 'amount' => 1093]], 1093],
+    [[['name' => 'Villain', 'amount' => 546], ['name' => 'Hero', 'amount' => 547]], 547],
+    [[['name' => 'Third', 'amount' => 364], ['name' => 'Hero', 'amount' => 365], ['name' => 'Villain', 'amount' => 364]], 365],
+    [[['name' => 'Third', 'amount' => 547], ['name' => 'Villain', 'amount' => 546]], 0],
+]);
+
+it('rolls back an invalid winner list without closing or recording the hand', function (array $winners): void {
+    run(function () use ($winners): void {
+        $user = TestData::user();
+        $game = TestData::game($user);
+        TestData::players($game);
+        TestData::event($game, GameEvent::HAND_CARD, ['cards' => ['As', 'Qd']]);
+        $service = new GameService(new CreditService, new PokerManager);
+        expect(fn () => $service->append($user, $game->uuid, (string) Str::uuid(), GameEvent::HAND_OVER, ['winners' => $winners]))->toThrow(GameException::class);
+        expect($game->refresh()->status)->toBe(GameStatusEnum::OPEN)
+            ->and($game->events()->count())->toBe(1);
+    });
+})->with([
+    [[]],
+    [[['name' => 'Unknown', 'amount' => 1]]],
+    [[['name' => 'Hero', 'amount' => 1], ['name' => 'Hero', 'amount' => 2]]],
+    [[['name' => 'Hero', 'amount' => -1]]],
+    [[['name' => 'Hero', 'amount' => 1.25]]],
+    [[['name' => 'Hero', 'amount' => '1']]],
+    [[['name' => 'Hero', 'amount' => 9007199254740992]]],
+    [[['name' => 'Hero']]],
+    [['named' => ['name' => 'Hero', 'amount' => 1]]],
+]);

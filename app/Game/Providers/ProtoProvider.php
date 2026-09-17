@@ -14,6 +14,7 @@ use App\Vo\Game\RequestActionResultVo;
 use Carbon\CarbonImmutable;
 use Hyperf\Stringable\Str;
 use Swoole\Coroutine;
+use Swoole\Timer;
 use Throwable;
 
 final class ProtoProvider extends SocketJsonProvider
@@ -22,9 +23,19 @@ final class ProtoProvider extends SocketJsonProvider
 
     private ?string $sessionId = null;
 
+    private int $frameSequence = 0;
+
+    private ?string $connectionId = null;
+
+    /** @var array<string, array{callback: \Closure(string): void, timer: int}> */
+    private array $settlements = [];
+
     protected function onOpen(): void
     {
         $this->authenticated = false;
+        $this->connectionId = (string) Str::uuid();
+        $this->frameSequence = 0;
+        $this->logger()->info('Proto connection opened', ['connection_id' => $this->connectionId]);
         $authentication = array_filter([
             'token' => $this->options['token'] ?? '',
             'sessionId' => $this->sessionId,
@@ -33,30 +44,26 @@ final class ProtoProvider extends SocketJsonProvider
         if (! $this->send($authentication)) {
             throw new \RuntimeException('Proto authentication could not be sent');
         }
-        $this->logger()->info('Proto provider connected; authentication sent');
     }
 
     protected function onMessage(array $message, int $opcode): void
     {
-        $this->logger()->info('Proto provider message received', [
-            'struct_type' => $message['structType'] ?? null,
-            'game_id' => $message['gameId'] ?? null,
-        ]);
+        if (isset($message['gameId'])) {
+            $message['gameId'] = $this->internalGameId((string) $message['gameId']);
+        }
         if (array_key_exists('result', $message)) {
             $this->authenticated = ($message['result'] ?? false) === true;
             if ($this->authenticated) {
                 $this->sessionId = isset($message['sessionId']) ? (string) $message['sessionId'] : null;
-                $this->logger()->info('Proto provider authenticated', ['has_session' => $this->sessionId !== null]);
-            } else {
-                $this->logger()->warning('Proto provider authentication rejected', ['info' => $message['info'] ?? null]);
             }
 
             return;
         }
         if (isset($message['error'])) {
             $gameId = isset($message['gameId']) ? (string) $message['gameId'] : null;
-            $this->logger()->warning('Proto provider rejected game request', ['game_id' => $gameId, 'error' => $message['error']]);
-            if ($gameId !== null && $this->hasRequestActionCallback($gameId)) {
+            if ($gameId !== null && isset($this->settlements[$gameId])) {
+                $this->rejectSettlement($gameId, (string) $message['error']);
+            } elseif ($gameId !== null && $this->hasRequestActionCallback($gameId)) {
                 $this->callRequestActionCallback($gameId, RequestActionResultVo::failure(PokerException::providerRejected()));
             }
 
@@ -79,13 +86,6 @@ final class ProtoProvider extends SocketJsonProvider
      */
     public function handlePlayerAction(array $message): void
     {
-        // Keep the exact advice amount/type visible when validation rejects a provider response.
-        $this->logger()->info('Proto advice received', [
-            'game_id' => $message['gameId'] ?? null,
-            'action' => $message['action'] ?? null,
-            'amount' => $message['amount'] ?? null,
-            'amount_type' => get_debug_type($message['amount'] ?? null),
-        ]);
         if (! $this->hasRequestActionCallback($message['gameId'])) {
             return;
         }
@@ -142,7 +142,7 @@ final class ProtoProvider extends SocketJsonProvider
         $synced = $this->send($this->gameEvents($game));
         $requested = $synced && $this->send([
             'structType' => 'getAnswer',
-            'gameId' => $game->uuid,
+            'gameId' => $this->externalGameId($game),
             'potForAlpha' => $game->pot,
             'delay' => (int) ($this->options['delay'] ?? 9000),
         ]);
@@ -151,12 +151,53 @@ final class ProtoProvider extends SocketJsonProvider
 
             return;
         }
-        $this->logger()->info('Proto solve request dispatched', ['game_id' => $game->uuid, 'pot' => $game->pot]);
+    }
+
+    /** One record per wire frame; business handlers never repeat the payload. */
+    protected function onFrame(string $direction, string $data, int $opcode, ?bool $sent = null): void
+    {
+        $context = [
+            'connection_id' => $this->connectionId,
+            'sequence' => ++$this->frameSequence,
+            'direction' => $direction,
+            'opcode' => $opcode,
+            'bytes' => strlen($data),
+        ];
+        if ($sent !== null) {
+            $context['sent'] = $sent;
+        }
+        $message = $opcode === 1 ? json_decode($data, true) : null;
+        if (is_array($message)) {
+            $context['message'] = $this->redact($message);
+        } elseif ($opcode === 1) {
+            // Never log unknown raw bytes: malformed authentication may contain secrets.
+            $context['invalid_json'] = true;
+        }
+        $level = $sent === false || (is_array($message) && (isset($message['error']) || ($message['result'] ?? null) === false))
+            ? 'warning' : (in_array($opcode, [9, 10], true) ? 'debug' : 'info');
+        $this->logger()->log($level, 'Proto frame', $context);
+    }
+
+    /** @param array<array-key, mixed> $message
+     * @return array<array-key, mixed>
+     */
+    private function redact(array $message): array
+    {
+        foreach ($message as $key => $value) {
+            if (in_array(strtolower((string) $key), ['token', 'sessionid', 'authorization', 'password', 'secret'], true)) {
+                $message[$key] = '[redacted]';
+            } elseif (is_array($value)) {
+                $message[$key] = $this->redact($value);
+            }
+        }
+
+        return $message;
     }
 
     protected function onError(Throwable $error): void
     {
         $this->logger()->warning('Proto provider connection error', [
+            'connection_id' => $this->connectionId,
             'exception' => $error::class,
             'message' => $error->getMessage(),
         ]);
@@ -164,7 +205,11 @@ final class ProtoProvider extends SocketJsonProvider
 
     protected function onClose(): void
     {
+        $this->logger()->info('Proto connection closed', ['connection_id' => $this->connectionId]);
         $this->authenticated = false;
+        foreach (array_keys($this->settlements) as $gameId) {
+            $this->rejectSettlement($gameId, 'Connection closed; settlement delivery is unknown');
+        }
     }
 
     private function awaitAuthenticated(float $timeout): bool
@@ -180,9 +225,58 @@ final class ProtoProvider extends SocketJsonProvider
         return $this->authenticated;
     }
 
-    public function over(Game $game): void
+    /** The callback reports failures only: Proto never acknowledges successful fullGameLog. */
+    public function over(Game $game, ?\Closure $onError = null): void
     {
-        $this->send($this->gameEvents($game, true));
+        // Errors carry only gameId; retire any solve before the settlement phase.
+        $this->callRequestActionCallback($game->uuid, RequestActionResultVo::failure(PokerException::solveStale()));
+        if (! $this->awaitAuthenticated((float) ($this->options['connect_timeout'] ?? 10))) {
+            throw PokerException::providerUnavailable();
+        }
+        $gameId = $game->uuid;
+        if ($onError !== null) {
+            if (isset($this->settlements[$game->uuid])) {
+                Timer::clear($this->settlements[$game->uuid]['timer']);
+            }
+            // Bound retained callbacks; expiry is NOT a confirmation of success.
+            $this->settlements[$game->uuid] = [
+                'callback' => $onError,
+                'timer' => Timer::after(60000, function () use ($gameId): void {
+                    unset($this->settlements[$gameId]);
+                }),
+            ];
+        }
+        if (! $this->send($this->gameEvents($game, true))) {
+            $this->rejectSettlement($game->uuid, 'Settlement could not be sent');
+            throw PokerException::providerUnavailable();
+        }
+    }
+
+    private function rejectSettlement(string $gameId, string $reason): void
+    {
+        $pending = $this->settlements[$gameId] ?? null;
+        if ($pending === null) {
+            return;
+        }
+        unset($this->settlements[$gameId]);
+        Timer::clear($pending['timer']);
+        ($pending['callback'])($reason);
+    }
+
+    private function externalGameId(Game $game): string
+    {
+        // Live WE settlement parsing requires a millisecond timestamp followed by a
+        // numeric identifier before the underscore (verified by historical replay).
+        // PROTOCOL.md documents only uniqueness; keep this quirk inside the adapter.
+        $timestamp = CarbonImmutable::parse($game->created_at, 'UTC')->getTimestampMs();
+
+        return $timestamp.$game->id.'_'.$game->uuid;
+    }
+
+    private function internalGameId(string $gameId): string
+    {
+        return preg_match('/^\d{14,}_([0-9a-f-]{36})$/D', $gameId, $matches) === 1
+            ? $matches[1] : $gameId;
     }
 
     /** @return array<string, mixed> */
@@ -272,21 +366,21 @@ final class ProtoProvider extends SocketJsonProvider
                     break;
                 case GameEvent::HAND_OVER:
                     if ($over) {
-                        foreach ($game->players as $player) {
-                            if (! empty($player->cards)) {
-                                $events[] = [
-                                    'eventType' => 'handShown',
-                                    'name' => $player->name,
-                                    'cards' => implode(',', $player->cards),
-                                ];
-                            }
-
+                        // Private known cards are not evidence that a player showed their hand.
+                        foreach ($payload['shown'] ?? [] as $shown) {
+                            $events[] = [
+                                'eventType' => 'handShown',
+                                'name' => $shown['name'],
+                                'cards' => implode(',', $shown['cards']),
+                            ];
                         }
-                        $events[] = [
-                            'eventType' => 'playerWon',
-                            'name' => $payload['winner']['name'] ?? '',
-                            'amount' => $payload['winner']['amount'] ?? 0,
-                        ];
+                        foreach ($payload['winners'] as $winner) {
+                            $events[] = [
+                                'eventType' => 'playerWon',
+                                'name' => $winner['name'],
+                                'amount' => $winner['amount'],
+                            ];
+                        }
                         $events[] = ['eventType' => 'gameOver'];
                     }
                     break;
@@ -304,7 +398,7 @@ final class ProtoProvider extends SocketJsonProvider
         return [
             'structType' => $over ? 'fullGameLog' : 'gameEvents',
             'game' => [
-                'gameId' => $game->uuid,
+                'gameId' => $this->externalGameId($game),
                 'pokerNetwork' => $this->options['network'] ?? 'WE',
                 'gameType' => 'NL',
                 'network' => $game->network->name,

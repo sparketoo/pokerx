@@ -110,7 +110,7 @@ it('dispatches hand_start, persists it and acknowledges the client', function ()
                 $this->calls[] = 'request';
             }
 
-            public function over(Game $game): void
+            public function over(Game $game, ?Closure $onError = null): void
             {
                 $this->calls[] = 'over';
             }
@@ -191,15 +191,18 @@ it('dispatches hand_start, persists it and acknowledges the client', function ()
             [GameEvent::FORCE_BET, ['hand_uuid' => $game->uuid, 'extra_bets' => [['name' => 'Hero', 'type' => 'post', 'amount' => 0.02]]]],
             [GameEvent::PLAYER_ACTED, ['hand_uuid' => $game->uuid, 'name' => 'Hero', 'action' => 'raise', 'amount' => 1.25]],
             [GameEvent::PLAYER_ACTED, ['hand_uuid' => $game->uuid, 'name' => 'Hero', 'action' => 'raise', 'amount' => '2']],
-            [GameEvent::HAND_OVER, ['hand_uuid' => $game->uuid, 'winner' => ['name' => 'Hero', 'amount' => 2.5]]],
+            [GameEvent::HAND_OVER, ['hand_uuid' => $game->uuid, 'winners' => [['name' => 'Hero', 'amount' => 2.5]]]],
             [GameEvent::FORCE_BET, ['hand_uuid' => $game->uuid, 'small_blind' => 50, 'big_blind' => 100]],
             [GameEvent::HAND_CARD, ['hand_uuid' => $game->uuid, 'cards' => ['As', 'Qd']]],
             [GameEvent::STAGE_START, ['hand_uuid' => $game->uuid, 'stage' => 'invalid', 'cards' => []]],
             [GameEvent::PLAYER_ACTED, ['hand_uuid' => $game->uuid, 'name' => 'Hero', 'action' => 'raise']],
             [GameEvent::KNOWN_PLAY_CARDS, ['hand_uuid' => $game->uuid, 'name' => 'Hero', 'cards' => ['As']]],
             [GameEvent::REQUEST_ACTION, ['hand_uuid' => 'not-a-uuid']],
-            [GameEvent::HAND_OVER, ['hand_uuid' => $game->uuid, 'winner' => ['name' => 'Hero']]],
+            [GameEvent::HAND_OVER, ['hand_uuid' => $game->uuid, 'winners' => [['name' => 'Hero']]]],
         ];
+        foreach ([[], [['name' => 'Hero', 'amount' => 1], ['name' => 'Hero', 'amount' => 2]], [['name' => 'Hero', 'amount' => -1]], [['name' => 'Hero', 'amount' => '2']], [['name' => 'Hero', 'amount' => 9007199254740992]], ['named' => ['name' => 'Hero', 'amount' => 1]]] as $winners) {
+            $invalidEvents[] = [GameEvent::HAND_OVER, ['hand_uuid' => $game->uuid, 'winners' => $winners]];
+        }
         foreach ($invalidEvents as [$type, $payload]) {
             $server->onMessage($swoole, websocketFrame(91, json_encode([
                 'id' => (string) Str::uuid(), 'type' => $type, 'timestamp' => (int) floor(microtime(true) * 1000),
@@ -223,6 +226,8 @@ it('returns the provider action in the request_action acknowledgement', function
         {
             /** @var list<string> */
             public array $calls = [];
+
+            public ?Closure $settlementError = null;
 
             public function start(Game $game): void
             {
@@ -250,9 +255,10 @@ it('returns the provider action in the request_action acknowledgement', function
                 $callback(RequestActionResultVo::success(ActionEnum::ALL_IN, 900));
             }
 
-            public function over(Game $game): void
+            public function over(Game $game, ?Closure $onError = null): void
             {
                 $this->calls[] = 'over';
+                $this->settlementError = $onError;
             }
         };
         $manager = new PokerManager;
@@ -298,7 +304,7 @@ it('returns the provider action in the request_action acknowledgement', function
             'id' => $overId, 'type' => GameEvent::HAND_OVER, 'timestamp' => (int) floor(microtime(true) * 1000),
             'payload' => [
                 'hand_uuid' => $uuid,
-                'winner' => ['name' => 'Hero', 'amount' => 300],
+                'winners' => [['name' => 'Villain', 'amount' => 546], ['name' => 'Hero', 'amount' => 547]],
                 'shown' => [['name' => 'Hero', 'cards' => ['As', 'Qd']]],
             ],
         ], JSON_THROW_ON_ERROR)));
@@ -317,9 +323,22 @@ it('returns the provider action in the request_action acknowledgement', function
             ->and($game->pot)->toBe(250)
             ->and($game->bet_amount)->toBe(150)
             ->and($game->status)->toBe(GameStatusEnum::CLOSED)
-            ->and($game->winnings)->toBe(300)
-            ->and($game->profit)->toBe(150)
+            ->and($game->winnings)->toBe(547)
+            ->and($game->profit)->toBe(397)
             ->and($game->events()->count())->toBe(6);
+        ($provider->settlementError)('upstream settlement rejected');
+        expect($sender->messages)->toHaveCount(7)
+            ->and($sender->messages[6]['message']['type'])->toBe('hand_over.error')
+            ->and($sender->messages[6]['message']['reply_to'])->toBeNull()
+            ->and($sender->messages[6]['message']['payload'])->toBe([
+                'hand_uuid' => $uuid, 'event_id' => $overId,
+                'code' => 'settlement_rejected', 'message' => 'upstream settlement rejected',
+            ]);
+        $server->onClose($swoole, 92, 0);
+        $server->onOpen($swoole, websocketOpenRequest(92, $token));
+        ($provider->settlementError)('late failure for closed connection');
+        expect($sender->messages)->toHaveCount(7);
+
     });
 });
 
@@ -332,7 +351,7 @@ it('upserts a hand refresh and returns the stable hand UUID in its acknowledgeme
 
             public function requestAction(Game $game, Closure $callback): void {}
 
-            public function over(Game $game): void
+            public function over(Game $game, ?Closure $onError = null): void
             {
                 $this->calls[] = 'over';
             }
@@ -374,7 +393,7 @@ it('upserts a hand refresh and returns the stable hand UUID in its acknowledgeme
 
         $payload['events'][] = [
             'type' => GameEvent::HAND_OVER,
-            'payload' => ['winner' => ['name' => 'Hero', 'amount' => 300]],
+            'payload' => ['winners' => [['name' => 'Villain', 'amount' => 124], ['name' => 'Hero', 'amount' => 126]]],
         ];
         $secondId = (string) Str::uuid();
         $server->onMessage($swoole, websocketFrame(93, json_encode([
@@ -390,6 +409,8 @@ it('upserts a hand refresh and returns the stable hand UUID in its acknowledgeme
             ->and(Game::query()->where('user_id', $user->id)->where('room_number', 'full-ws-room')->count())->toBe(1)
             ->and($game->status)->toBe(GameStatusEnum::CLOSED)
             ->and($game->events()->count())->toBe(5)
+            ->and($game->winnings)->toBe(126)
+            ->and($game->profit)->toBe(-24)
             ->and($provider->calls)->toBe(['over']);
     });
 });

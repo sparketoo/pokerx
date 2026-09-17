@@ -19,7 +19,7 @@ abstract class BaseProvider implements ProviderInterface
 
     public function knownPlayerCards(Game $game): void {}
 
-    public function over(Game $game): void {}
+    public function over(Game $game, ?\Closure $onError = null): void {}
 
     protected function logger(): LoggerInterface
     {

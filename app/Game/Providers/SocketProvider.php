@@ -62,6 +62,8 @@ abstract class SocketProvider extends BaseProvider
 
     protected function onPing(): void {}
 
+    protected function onFrame(string $direction, string $data, int $opcode, ?bool $sent = null): void {}
+
     protected function onError(Throwable $error): void {}
 
     final public function isConnected(): bool
@@ -100,8 +102,20 @@ abstract class SocketProvider extends BaseProvider
                     }
                     while ($this->socket === $socket) {
                         $frame = $socket->recv();
-                        if ($this->socket !== $socket || ! $frame instanceof Frame || $frame->opcode === 8) {
+                        if ($this->socket !== $socket || ! $frame instanceof Frame) {
                             break;
+                        }
+                        $this->onFrame('receive', $frame->data, $frame->opcode);
+                        if ($frame->opcode === 8) {
+                            break;
+                        }
+                        if ($frame->opcode === 9) {
+                            $this->write($frame->data, 10);
+
+                            continue;
+                        }
+                        if ($frame->opcode === 10) {
+                            continue;
                         }
                         $this->onData($frame->data, $frame->opcode);
                     }
@@ -123,6 +137,14 @@ abstract class SocketProvider extends BaseProvider
 
     /** Disconnected messages are never queued or replayed. */
     final public function write(string $data, int $opcode = 1): bool
+    {
+        $sent = $this->writeFrame($data, $opcode);
+        $this->onFrame('send', $data, $opcode, $sent);
+
+        return $sent;
+    }
+
+    private function writeFrame(string $data, int $opcode): bool
     {
         $socket = $this->socket;
         $writer = $this->writer;
@@ -159,7 +181,7 @@ abstract class SocketProvider extends BaseProvider
             return;
         }
         try {
-            if (! $socket->push('', 9)) {
+            if (! $this->write('', 9)) {
                 throw new RuntimeException('WebSocket ping failed');
             }
             $this->onPing();

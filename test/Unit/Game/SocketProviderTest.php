@@ -24,7 +24,12 @@ final class CallbackProvider extends SocketProvider
         $this->callRequestActionCallback($gameId, $result);
     }
 
-    protected function onData(string $data, int $opcode): void {}
+    public array $dataFrames = [];
+
+    protected function onData(string $data, int $opcode): void
+    {
+        $this->dataFrames[] = [$data, $opcode];
+    }
 }
 
 it('settles provider callbacks once and allows another request for the same hand', function (): void {
@@ -85,6 +90,7 @@ it('settles in-flight requests when the upstream connection closes', function ()
             }
             $accept = base64_encode(sha1(trim($match[1]).'258EAFA5-E914-47DA-95CA-C5AB0DC85B11', true));
             $client->send("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: {$accept}\r\n\r\n");
+            $client->send("\x8a\x00\x89\x00\x81\x02{}");
             $connected->push(true);
             $release->pop(1);
             $client->close();
@@ -94,6 +100,7 @@ it('settles in-flight requests when the upstream connection closes', function ()
         $provider->connect();
         $connected->pop(1);
         Coroutine::sleep(0.01);
+        expect($provider->dataFrames)->toBe([['{}', 1]]);
         $result = new Channel(1);
         $provider->requestAction(new Game(['uuid' => 'disconnect-hand']), function (RequestActionResultVo $value) use ($result): void {
             $result->push($value);

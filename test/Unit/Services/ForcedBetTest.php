@@ -175,7 +175,7 @@ it('preserves integer bets recommendations and settlement in storage and Proto',
             expect($advice->amount)->toBe(175);
         }
         $game = $service->append($user, $game->uuid, (string) Str::uuid(), GameEvent::PLAYER_ACTED, ['name' => 'Hero', 'action' => 'call', 'amount' => 175]);
-        $game = $service->append($user, $game->uuid, (string) Str::uuid(), GameEvent::HAND_OVER, ['winner' => ['name' => 'Hero', 'amount' => 443]]);
+        $game = $service->append($user, $game->uuid, (string) Str::uuid(), GameEvent::HAND_OVER, ['winners' => [['name' => 'Hero', 'amount' => 443]]]);
         $data = $game->toArray();
         expect($data['pot'])->toBe(450)->and($data['bet_amount'])->toBe(225)
             ->and($data['winnings'])->toBe(443)->and($data['profit'])->toBe(218);

@@ -91,6 +91,7 @@ final class PokerServer implements OnCloseInterface, OnMessageInterface, OnOpenI
                 return;
             }
 
+            $this->logger->info('Poker audit receive', ['fd' => $fd, 'message' => $message]);
             $this->handleGameEvents($fd, $id, $message);
 
         } catch (Throwable $error) {
@@ -284,19 +285,40 @@ final class PokerServer implements OnCloseInterface, OnMessageInterface, OnOpenI
     {
         $this->validatePayload($message->payload, [
             ...$this->handUuidRules(),
-            'winner' => ['required', 'array'],
-            'winner.name' => ['required', 'string', 'max:64'],
-            'winner.amount' => ['required', 'integer:strict', 'min:0', 'max:9007199254740991'],
+            ...$this->handOverRules(),
+        ]);
+        $game = $this->append($message);
+        $connection = $this->connections[$message->fd] ?? null;
+        $this->providerFor($game)->over($game, function (string $reason) use ($message, $game, $connection): void {
+            // A reused fd must never deliver a previous connection's private game data.
+            if ($connection === null || ($this->connections[$message->fd] ?? null) !== $connection) {
+                return;
+            }
+            $this->reply($message->fd, 'hand_over.error', [
+                'hand_uuid' => $game->uuid,
+                'event_id' => $message->id,
+                'code' => 'settlement_rejected',
+                'message' => $reason,
+            ]);
+        });
+
+        return $game;
+    }
+
+    /** @return array<string, list<string>> */
+    private function handOverRules(): array
+    {
+        return [
+            'winners' => ['required', 'array', 'list', 'min:1'],
+            'winners.*' => ['required', 'array'],
+            'winners.*.name' => ['required', 'string', 'max:64', 'distinct:strict'],
+            'winners.*.amount' => ['required', 'integer:strict', 'min:0', 'max:9007199254740991'],
             'shown' => ['sometimes', 'array', 'list'],
             'shown.*' => ['required', 'array'],
             'shown.*.name' => ['required', 'string', 'max:64'],
             'shown.*.cards' => ['required', 'array', 'list', 'size:2'],
             'shown.*.cards.*' => ['required', 'string', 'max:3'],
-        ]);
-        $game = $this->append($message);
-        $this->providerFor($game)->over($game);
-
-        return $game;
+        ];
     }
 
     private function connection(int $fd): PokerServerConnectionVo
@@ -325,7 +347,10 @@ final class PokerServer implements OnCloseInterface, OnMessageInterface, OnOpenI
             'reply_to' => $replyTo,
             'payload' => $payload,
         ];
-        $this->sender->push($fd, json_encode($message, JSON_THROW_ON_ERROR));
+        $sent = $this->sender->push($fd, json_encode($message, JSON_THROW_ON_ERROR));
+        if ($type !== GameEvent::PONG) {
+            $this->logger->info('Poker audit send', ['fd' => $fd, 'sent' => $sent, 'message' => $message]);
+        }
     }
 
     private function replyError(int $fd, Throwable $error, ?string $replyTo = null): void
@@ -466,16 +491,7 @@ final class PokerServer implements OnCloseInterface, OnMessageInterface, OnOpenI
                     'cards' => ['required', 'array', 'list', 'size:2'],
                     'cards.*' => ['required', 'string', 'max:3'],
                 ],
-                GameEvent::HAND_OVER => [
-                    'winner' => ['required', 'array'],
-                    'winner.name' => ['required', 'string', 'max:64'],
-                    'winner.amount' => ['required', 'integer:strict', 'min:0', 'max:9007199254740991'],
-                    'shown' => ['sometimes', 'array', 'list'],
-                    'shown.*' => ['required', 'array'],
-                    'shown.*.name' => ['required', 'string', 'max:64'],
-                    'shown.*.cards' => ['required', 'array', 'list', 'size:2'],
-                    'shown.*.cards.*' => ['required', 'string', 'max:3'],
-                ],
+                GameEvent::HAND_OVER => $this->handOverRules(),
                 default => throw GatewayException::eventInvalid(),
             };
             $fullEvents[] = [

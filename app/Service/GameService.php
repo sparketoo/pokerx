@@ -13,6 +13,7 @@ use App\Exception\GatewayException;
 use App\Game\PokerManager;
 use App\Model\Event;
 use App\Model\Game;
+use App\Model\GamePlayer;
 use App\Model\User;
 use Hyperf\DbConnection\Db as DB;
 use Hyperf\Stringable\Str;
@@ -266,7 +267,7 @@ final class GameService
                     }
                 }
                 if ($event['type'] === GameEvent::HAND_OVER) {
-                    $winnings = $this->winningsForName($heroName, $payload);
+                    $winnings = $this->winningsForName($heroName, array_map(static fn (array $player): string => $player['name'], $players), $payload);
                     $status = GameStatusEnum::CLOSED;
                 }
             }
@@ -326,19 +327,37 @@ final class GameService
     /** @param  array<string, mixed>  $payload */
     private function winningsFor(Game $game, array $payload): int
     {
-        return $this->winningsForName($this->heroName($game), $payload);
+        return $this->winningsForName($this->heroName($game), array_map(static fn (GamePlayer $player): string => $player->name, $game->players()->get()->all()), $payload);
     }
 
-    /** @param  array<string, mixed>  $payload */
-    private function winningsForName(string $heroName, array $payload): int
+    /**
+     * @param  array<int, string>  $playerNames
+     * @param  array<string, mixed>  $payload
+     */
+    private function winningsForName(string $heroName, array $playerNames, array $payload): int
     {
-        $winner = $payload['winner'] ?? null;
-        $amount = is_array($winner) ? $winner['amount'] ?? null : null;
-        if (! is_array($winner) || ! is_string($winner['name'] ?? null) || ! is_int($amount) || $amount < 0) {
+        $winners = $payload['winners'] ?? null;
+        if (! is_array($winners) || ! array_is_list($winners) || $winners === []) {
             throw GameException::invalidGameOver();
         }
 
-        return $winner['name'] === $heroName ? $amount : 0;
+        $seen = [];
+        $winnings = 0;
+        foreach ($winners as $winner) {
+            $name = is_array($winner) ? $winner['name'] ?? null : null;
+            $amount = is_array($winner) ? $winner['amount'] ?? null : null;
+            if (! is_string($name) || ! in_array($name, $playerNames, true) || in_array($name, $seen, true)
+                || ! is_int($amount) || $amount < 0 || $amount > 9007199254740991) {
+                throw GameException::invalidGameOver();
+            }
+            $seen[] = $name;
+            if ($name === $heroName) {
+                // Main-pot share only; side-pot proceeds are not part of this event.
+                $winnings = $amount;
+            }
+        }
+
+        return $winnings;
     }
 
     /**

@@ -456,7 +456,7 @@ hand_start 回执的 payload.hand_uuid 是服务端牌局标识。之后所有�
           {"type":"hand_card","payload":{"cards":["As","Qd"]}},
           {"type":"stage_start","payload":{"stage":"preflop","cards":[]}},
           {"type":"player_acted","payload":{"name":"Hero","action":"raise","amount":200}},
-          {"type":"hand_over","payload":{"winner":{"name":"Hero","amount":300}}}
+          {"type":"hand_over","payload":{"winners":[{"name":"Hero","amount":300}]}}
         ]
       }
     }
@@ -653,12 +653,18 @@ action 可为 fold、check、call、bet、raise、all-in。只有这个事件会
       "timestamp":1789185605000,
       "payload":{
         "hand_uuid":"c69424e0-71bd-4711-8bb3-31b2ad650d55",
-        "winner":{"name":"Hero","amount":2650},
+        "winners":[{"name":"Hero","amount":1325},{"name":"Villain","amount":1325}],
         "shown":[{"name":"Hero","cards":["As","Qd"]}]
       }
     }
 
-hand_uuid、winner.name、winner.amount 必填；shown 可选，出现时每项均须含 name 和两张 cards。成功后状态从 OPEN 变为 CLOSED（不会进入 SETTLED）；若 winner 是 Hero，则 winnings 为 winner.amount，否则为 0；profit = winnings - bet_amount。回执为 hand_over.ack。
+hand_uuid 和非空 winners 数组必填；每项的 name 必须是本手玩家且不能重复，amount 为非负安全整数（最大 9007199254740991），拒绝小数和数字字符串。单赢家也用单项数组，不再接受旧 winner 字段。shown 可选，出现时每项均须含 name 和两张 cards，表示实际摊牌者，与赢家名单独立。
+
+winners 只表示主池获奖者及各自实际分配的金额，不包括边池收益；按游戏平台实际结果上报，不自行平均分配或调整余数筹码。该列表保存在 events.payload JSON 内，无需新增表。旧数据如含 winner，应一次性转成单项 winners；前后端须协调更新。
+
+成功后状态从 OPEN 变为 CLOSED（不会进入 SETTLED）；winnings 为 winners 中 Hero 的金额，没有 Hero 则为 0；profit = winnings - bet_amount。这里仍是主池结算口径，不能代表包含边池收益的完整盈亏。回执为 hand_over.ack，确认的是本地保存；第三方异步拒绝继续通过 hand_over.error 反馈，不代表第三方已确认入账。
+
+ProtoProvider 在一次 fullGameLog 中为每位赢家生成一条 playerWon，随后仅生成一条 gameOver；实际 handShown 在这些获奖事件之前。实时上报与 hand_refresh 使用相同结算校验。
 
 ### Provider 连接模型
 
