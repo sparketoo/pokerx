@@ -6,6 +6,7 @@ namespace Tests\Support;
 
 use App\Constants\GameEvent;
 use App\Enum\GameStatusEnum;
+use App\Enum\NetworkEnum;
 use App\Model\Event;
 use App\Model\Game;
 use App\Model\User;
@@ -61,7 +62,7 @@ final class TestData
             'room_number' => 'room-'.$suffix,
             'hand_number' => random_int(1, 4_294_967_295),
             'provider' => 'mock',
-            'game_type' => 'NL',
+            'network' => NetworkEnum::WE,
             'big_blind' => 100,
             'small_blind' => 50,
             'ante' => 0,
@@ -80,7 +81,7 @@ final class TestData
     }
 
     /** @param array<string, mixed> $payload */
-    public static function event(Game $game, string $type = GameEvent::GAME_START, array $payload = [], ?int $seq = null): Event
+    public static function event(Game $game, string $type = GameEvent::HAND_START, array $payload = [], ?int $seq = null): Event
     {
         return $game->events()->create([
             'uuid' => (string) Str::uuid(),

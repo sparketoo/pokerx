@@ -19,10 +19,11 @@ final class RequestActionResultVo extends Vo
         public readonly ?string $reason
     ) {}
 
-    public static function success(ActionEnum $action, int $amount): self
+    public static function success(ActionEnum $action, int|float $amount): self
     {
-        if ($amount < 0 || $amount > 9007199254740991 || (in_array($action, [ActionEnum::FOLD, ActionEnum::CHECK],
-            true) && $amount !== 0)) {
+        // Reject fractional/unsafe upstream advice rather than silently truncating it.
+        if (! is_int($amount) || $amount < 0 || $amount > 9007199254740991
+            || (in_array($action, [ActionEnum::FOLD, ActionEnum::CHECK], true) && $amount !== 0)) {
             throw new InvalidArgumentException('Invalid action amount');
         }
 

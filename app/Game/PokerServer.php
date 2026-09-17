@@ -6,6 +6,7 @@ namespace App\Game;
 
 use App\Constants\GameEvent;
 use App\Enum\ActionEnum;
+use App\Enum\NetworkEnum;
 use App\Enum\SeatTypeEnum;
 use App\Enum\StageEnum;
 use App\Exception\AppException;
@@ -134,57 +135,92 @@ final class PokerServer implements OnCloseInterface, OnMessageInterface, OnOpenI
         );
         $game = $this->$method($message);
 
-        $this->reply($fd, $type.'.ack', ['game_uuid' => $game->uuid], $id);
+        if ($type === GameEvent::REQUEST_ACTION) {
+            return;
+        }
+
+        $this->reply($fd, $type.'.ack', ['hand_uuid' => $game->uuid], $id);
     }
 
-    public function handleGameStart(PokerServerMessageVo $message): Game
+    public function handleHandStart(PokerServerMessageVo $message): Game
     {
-        $payload = $this->validatorFactory->make($message->payload, [
-            'room_number' => ['required', 'string', 'max:64'],
-            'hand_number' => ['required', 'integer', 'min:1'],
-            'provider' => ['required', 'string', 'max:32'],
-            'game_type' => ['sometimes', 'string', 'max:32'],
-            'big_blind' => ['required', 'numeric', 'decimal:0,4', 'min:0.0001', 'max:9999999999.9999'],
-            'small_blind' => [
-                'required', 'numeric', 'decimal:0,4', 'min:0.0001', 'max:9999999999.9999', 'lte:big_blind',
-            ],
-            'ante' => ['sometimes', 'numeric', 'decimal:0,4', 'min:0', 'max:9999999999.9999'],
-            'players' => ['required', 'array', 'list', 'min:1'],
-            'players.*' => ['required', 'array'],
-            'players.*.seat' => ['required', 'integer', 'min:1', 'distinct'],
-            'players.*.name' => ['required', 'string', 'max:64', 'distinct'],
-            'players.*.hero' => ['required', 'boolean'],
-            'players.*.stack' => ['required', 'numeric', 'decimal:0,4', 'min:0', 'max:9999999999.9999'],
-            'players.*.seat_type' => ['required', 'string', 'in:'.SeatTypeEnum::implode()],
-            'players.*.amount' => ['present', 'nullable', 'numeric', 'decimal:0,4', 'min:0', 'max:9999999999.9999'],
-        ])->validate();
+        $payload = $this->validatorFactory->make($message->payload, $this->handStartRules())->validate();
 
         $game = $this->gameService->create(
             $message->user,
             $payload['room_number'],
             $payload['hand_number'],
-            $payload['provider'],
-            $payload['big_blind'],
-            $payload['small_blind'],
-            $payload['ante'] ?? 0,
             $payload['players'],
             $message->id,
             $payload,
-            $payload['game_type'] ?? 'NL',
+            NetworkEnum::fromNameOrFail($payload['network']),
         );
-        $game->loadMissing(['players', 'events']);
 
+        return $game;
+    }
+
+    public function handleForceBet(PokerServerMessageVo $message): Game
+    {
+        $this->validatePayload($message->payload, [
+            ...$this->handUuidRules(),
+            ...$this->forceBetRules(),
+        ]);
+
+        return $this->append($message);
+    }
+
+    public function handleHandCard(PokerServerMessageVo $message): Game
+    {
+        $this->validatePayload($message->payload, [
+            ...$this->handUuidRules(),
+            ...$this->handCardRules(),
+        ]);
+        $game = $this->append($message);
         $this->providerFor($game)->start($game);
 
         return $game;
     }
 
-    public function handleGameStage(PokerServerMessageVo $message): Game
+    /**
+     * Accept the complete, authoritative history for one hand.  This is used
+     * after a reporting interruption, when the client may not have received a
+     * hand_start acknowledgement and consequently has no hand_uuid to send.
+     */
+    public function handleHandRefresh(PokerServerMessageVo $message): Game
+    {
+        $payload = $message->payload;
+        $events = $payload['events'] ?? null;
+        $startPayload = $payload['game'] ?? $payload;
+        if (! is_array($events) || ! array_is_list($events) || ! is_array($startPayload)) {
+            throw GatewayException::eventInvalid();
+        }
+
+        $startPayload = $this->validatorFactory->make($startPayload, $this->handStartRules())->validate();
+        $events = $this->handRefreshEvents($events);
+        $game = $this->gameService->upsertHandRefresh(
+            $message->user,
+            $startPayload['room_number'],
+            $startPayload['hand_number'],
+            $startPayload['players'],
+            $message->id,
+            $startPayload,
+            $events,
+            NetworkEnum::fromNameOrFail($startPayload['network']),
+        );
+
+        if ($game->status->isClosed()) {
+            $this->providerFor($game)->over($game);
+        }
+
+        return $game;
+    }
+
+    public function handleStageStart(PokerServerMessageVo $message): Game
     {
         $this->validatePayload($message->payload, [
-            ...$this->gameUuidRules(),
+            ...$this->handUuidRules(),
             'stage' => ['required', 'string', 'in:'.$this->stageValues()],
-            'cards' => ['required', 'array', 'list', 'max:5'],
+            'cards' => ['present', 'array', 'list', 'max:5'],
             'cards.*' => ['required', 'string', 'max:3'],
         ]);
         $game = $this->append($message);
@@ -193,13 +229,13 @@ final class PokerServer implements OnCloseInterface, OnMessageInterface, OnOpenI
         return $game;
     }
 
-    public function handleGamePlayActed(PokerServerMessageVo $message): Game
+    public function handlePlayerActed(PokerServerMessageVo $message): Game
     {
         $this->validatePayload($message->payload, [
-            ...$this->gameUuidRules(),
+            ...$this->handUuidRules(),
             'name' => ['required', 'string', 'max:64'],
             'action' => ['required', 'string', 'in:'.$this->actionValues()],
-            'amount' => ['required', 'numeric', 'decimal:0,4', 'min:0', 'max:9999999999.9999'],
+            'amount' => ['required', 'integer:strict', 'min:0', 'max:9007199254740991'],
         ]);
         $game = $this->append($message);
         $this->providerFor($game)->playerActed($game);
@@ -207,10 +243,10 @@ final class PokerServer implements OnCloseInterface, OnMessageInterface, OnOpenI
         return $game;
     }
 
-    public function handleGameKnownPlayCards(PokerServerMessageVo $message): Game
+    public function handleKnownPlayCards(PokerServerMessageVo $message): Game
     {
         $this->validatePayload($message->payload, [
-            ...$this->gameUuidRules(),
+            ...$this->handUuidRules(),
             'name' => ['required', 'string', 'max:64'],
             'cards' => ['required', 'array', 'list', 'size:2'],
             'cards.*' => ['required', 'string', 'max:3'],
@@ -221,33 +257,36 @@ final class PokerServer implements OnCloseInterface, OnMessageInterface, OnOpenI
         return $game;
     }
 
-    public function handleGameRequestAction(PokerServerMessageVo $message): Game
+    public function handleRequestAction(PokerServerMessageVo $message): Game
     {
-        $this->validatePayload($message->payload, $this->gameUuidRules());
+        $this->validatePayload($message->payload, $this->handUuidRules());
         $game = $this->append($message);
         $this->providerFor($game)->requestAction($game,
             function (RequestActionResultVo $result) use ($message, $game) {
                 if ($result->success) {
-                    $this->reply($message->fd, 'game_play_action', [
-                        'game_uuid' => $game->uuid,
+                    $this->reply($message->fd, GameEvent::REQUEST_ACTION.'.ack', [
+                        'hand_uuid' => $game->uuid,
                         'action' => $result->action?->wire(),
                         'amount' => $result->amount,
                     ], $message->id);
                 } else {
-                    $this->replyError($message->fd, new \RuntimeException($result->reason ?? 'Unknown error'));
+                    $this->reply($message->fd, 'error', [
+                        'code' => $result->error_code ?? 'provider_unavailable',
+                        'message' => $result->reason ?? '',
+                    ], $message->id);
                 }
             });
 
         return $game;
     }
 
-    public function handleGameOver(PokerServerMessageVo $message): Game
+    public function handleHandOver(PokerServerMessageVo $message): Game
     {
         $this->validatePayload($message->payload, [
-            ...$this->gameUuidRules(),
+            ...$this->handUuidRules(),
             'winner' => ['required', 'array'],
             'winner.name' => ['required', 'string', 'max:64'],
-            'winner.amount' => ['required', 'numeric', 'decimal:0,4', 'min:0', 'max:9999999999.9999'],
+            'winner.amount' => ['required', 'integer:strict', 'min:0', 'max:9007199254740991'],
             'shown' => ['sometimes', 'array', 'list'],
             'shown.*' => ['required', 'array'],
             'shown.*.name' => ['required', 'string', 'max:64'],
@@ -320,7 +359,7 @@ final class PokerServer implements OnCloseInterface, OnMessageInterface, OnOpenI
     {
         return $this->gameService->append(
             $message->user,
-            (string) $message->payload['game_uuid'],
+            (string) $message->payload['hand_uuid'],
             $message->id,
             $message->type,
             $message->payload,
@@ -342,9 +381,140 @@ final class PokerServer implements OnCloseInterface, OnMessageInterface, OnOpenI
     }
 
     /** @return array<string, list<string>> */
-    private function gameUuidRules(): array
+    private function handUuidRules(): array
     {
-        return ['game_uuid' => ['required', 'uuid']];
+        return ['hand_uuid' => ['required', 'uuid']];
+    }
+
+    /** @return array<string, list<string>> */
+    private function handStartRules(): array
+    {
+        return [
+            'room_number' => ['required', 'string', 'max:64'],
+            'hand_number' => ['required', 'integer', 'min:1'],
+            'network' => ['required', 'string', 'in:'.NetworkEnum::implode()],
+            'players' => ['required', 'array', 'list', 'min:1'],
+            'players.*' => ['required', 'array'],
+            'players.*.seat' => ['required', 'integer', 'min:1', 'distinct'],
+            'players.*.name' => ['required', 'string', 'max:64', 'distinct'],
+            'players.*.hero' => ['required', 'boolean'],
+            'players.*.stack' => ['required', 'integer:strict', 'min:0', 'max:9007199254740991'],
+            'players.*.seat_type' => ['required', 'string', 'in:'.SeatTypeEnum::implode()],
+        ];
+    }
+
+    /** @return array<string, list<string>> */
+    private function forceBetRules(): array
+    {
+        return [
+            'big_blind' => ['required_with:small_blind', 'required_without:extra_bets', 'integer:strict', 'min:1', 'max:9007199254740991'],
+            'small_blind' => [
+                'required_with:big_blind', 'required_without:extra_bets', 'integer:strict', 'min:1', 'max:9007199254740991', 'lte:big_blind',
+            ],
+            'ante' => ['sometimes', 'integer:strict', 'min:0', 'max:9007199254740991'],
+            'extra_bets' => ['sometimes', 'array', 'list', 'min:1', 'max:18'],
+            'extra_bets.*' => ['required', 'array:name,type,amount'],
+            'extra_bets.*.name' => ['required', 'string', 'max:64'],
+            'extra_bets.*.type' => ['required', 'string', 'in:post,straddle'],
+            'extra_bets.*.amount' => ['required', 'integer:strict', 'min:1', 'max:9007199254740991'],
+        ];
+    }
+
+    /** @return array<string, list<string>> */
+    private function handCardRules(): array
+    {
+        return [
+            'cards' => ['required', 'array', 'list', 'size:2'],
+            'cards.*' => ['required', 'string', 'max:3'],
+        ];
+    }
+
+    /**
+     * @param  list<mixed>  $events
+     * @return list<array{type: string, payload: array<string, mixed>, id?: string}>
+     */
+    private function handRefreshEvents(array $events): array
+    {
+        $fullEvents = [];
+        $overSeen = false;
+        foreach ($events as $event) {
+            if (! is_array($event) || ! is_string($event['type'] ?? null) || ! is_array($event['payload'] ?? null)) {
+                throw GatewayException::eventInvalid();
+            }
+            if ($overSeen || $event['type'] === GameEvent::HAND_START) {
+                throw GatewayException::eventInvalid();
+            }
+            if (isset($event['id']) && (! is_string($event['id']) || ! preg_match('/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i', $event['id']))) {
+                throw GatewayException::eventInvalid();
+            }
+
+            $rules = match ($event['type']) {
+                GameEvent::FORCE_BET => $this->forceBetRules(),
+                GameEvent::HAND_CARD => $this->handCardRules(),
+                GameEvent::STAGE_START => [
+                    'stage' => ['required', 'string', 'in:'.$this->stageValues()],
+                    'cards' => ['present', 'array', 'list', 'max:5'],
+                    'cards.*' => ['required', 'string', 'max:3'],
+                ],
+                GameEvent::PLAYER_ACTED => [
+                    'name' => ['required', 'string', 'max:64'],
+                    'action' => ['required', 'string', 'in:'.$this->actionValues()],
+                    'amount' => ['required', 'integer:strict', 'min:0', 'max:9007199254740991'],
+                ],
+                GameEvent::KNOWN_PLAY_CARDS => [
+                    'name' => ['required', 'string', 'max:64'],
+                    'cards' => ['required', 'array', 'list', 'size:2'],
+                    'cards.*' => ['required', 'string', 'max:3'],
+                ],
+                GameEvent::HAND_OVER => [
+                    'winner' => ['required', 'array'],
+                    'winner.name' => ['required', 'string', 'max:64'],
+                    'winner.amount' => ['required', 'integer:strict', 'min:0', 'max:9007199254740991'],
+                    'shown' => ['sometimes', 'array', 'list'],
+                    'shown.*' => ['required', 'array'],
+                    'shown.*.name' => ['required', 'string', 'max:64'],
+                    'shown.*.cards' => ['required', 'array', 'list', 'size:2'],
+                    'shown.*.cards.*' => ['required', 'string', 'max:3'],
+                ],
+                default => throw GatewayException::eventInvalid(),
+            };
+            $fullEvents[] = [
+                'type' => $event['type'],
+                'payload' => $this->validatorFactory->make($event['payload'], $rules)->validate(),
+                ...(isset($event['id']) ? ['id' => $event['id']] : []),
+            ];
+            $overSeen = $event['type'] === GameEvent::HAND_OVER;
+        }
+
+        $initial = $fullEvents[0] ?? null;
+        if ($initial === null || $initial['type'] !== GameEvent::FORCE_BET
+            || ! isset($initial['payload']['small_blind'], $initial['payload']['big_blind'])) {
+            throw GatewayException::eventInvalid();
+        }
+        $dealt = false;
+        $preflop = true;
+        foreach (array_slice($fullEvents, 1) as $event) {
+            if ($event['type'] === GameEvent::FORCE_BET) {
+                if (! $preflop || array_intersect(['small_blind', 'big_blind', 'ante'], array_keys($event['payload'])) !== []) {
+                    throw GatewayException::eventInvalid();
+                }
+            } elseif ($event['type'] === GameEvent::HAND_CARD) {
+                if ($dealt) {
+                    throw GatewayException::eventInvalid();
+                }
+                $dealt = true;
+            } elseif (! $dealt) {
+                throw GatewayException::eventInvalid();
+            }
+            if ($event['type'] === GameEvent::STAGE_START && $event['payload']['stage'] !== 'preflop') {
+                $preflop = false;
+            }
+        }
+        if (! $dealt) {
+            throw GatewayException::eventInvalid();
+        }
+
+        return $fullEvents;
     }
 
     private function actionValues(): string

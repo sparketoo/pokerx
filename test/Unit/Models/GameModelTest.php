@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use App\Constants\GameEvent;
 use App\Enum\GameStatusEnum;
+use App\Enum\NetworkEnum;
 use App\Model\CreditRecord;
 use App\Model\Event;
 use App\Model\Game;
@@ -19,7 +20,7 @@ it('casts persisted models and exposes their relationships', function (): void {
         $user = TestData::user();
         $game = TestData::game($user);
         TestData::players($game);
-        $event = TestData::event($game, GameEvent::GAME_START, ['room_number' => $game->room_number]);
+        $event = TestData::event($game, GameEvent::HAND_START, ['room_number' => $game->room_number]);
         $token = TestData::token($user);
 
         $game = Game::query()->with(['user', 'players', 'events'])->findOrFail($game->id);
@@ -31,7 +32,8 @@ it('casts persisted models and exposes their relationships', function (): void {
             'type' => 'GRANT', 'amount' => 10, 'balance' => 1010,
         ]);
 
-        expect($game->status)->toBe(GameStatusEnum::OPEN)
+        expect($game->network)->toBe(NetworkEnum::WE)
+            ->and($game->status)->toBe(GameStatusEnum::OPEN)
             ->and($game->user->id)->toBe($user->id)
             ->and($game->hero()->name)->toBe('Hero')
             ->and($player)->toBeInstanceOf(GamePlayer::class)
@@ -46,10 +48,10 @@ it('casts persisted models and exposes their relationships', function (): void {
 
 it('casts the persisted pot and personal total bet amounts', function (): void {
     run(function (): void {
-        $game = TestData::game(TestData::user(), ['pot' => 1000.5, 'bet_amount' => 450.25]);
+        $game = TestData::game(TestData::user(), ['pot' => 100050, 'bet_amount' => 45025]);
         $game = Game::query()->findOrFail($game->id);
 
-        expect($game->pot)->toBe(1000.5)
-            ->and($game->bet_amount)->toBe(450.25);
+        expect($game->pot)->toBe(100050)
+            ->and($game->bet_amount)->toBe(45025);
     });
 });

@@ -14,22 +14,22 @@ class LoginRequest extends FormRequest
         return [
             'account' => 'required|string|max:64',
             'password' => 'required|string|max:255',
-            'code' => 'nullable|string|digits:6',
+            'two_factor_code' => 'nullable|string|digits:6',
         ];
     }
 
     public function account(): string
     {
-        return $this->requiredText('account', '');
+        return $this->validate('account');
     }
 
     public function password(): string
     {
-        return $this->requiredText('password', '');
+        return $this->validate('password');
     }
 
-    public function code(): ?string
+    public function twoFactorCode(): ?string
     {
-        return $this->text('code');
+        return $this->validate('two_factor_code');
     }
 }

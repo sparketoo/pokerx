@@ -13,6 +13,8 @@
     "license": "Apache-2.0",
     "require": {
         "php": "^8.4",
+        "ext-redis": "*",
+        "ext-swoole": ">=6.2.1",
         "hyperf/amqp": "~3.2.0",
         "hyperf/async-queue": "~3.2.0",
         "hyperf/cache": "~3.2.0",
@@ -29,6 +31,7 @@
         "hyperf/logger": "~3.2.0",
         "hyperf/memory": "~3.2.0",
         "hyperf/model-cache": "~3.2.0",
+        "hyperf/paginator": "~3.2",
         "hyperf/process": "~3.2.0",
         "hyperf/redis": "~3.2.0",
         "hyperf/translation": "~3.2.0",
@@ -36,9 +39,7 @@
         "hyperf/websocket-client": "~3.2.0",
         "hyperf/websocket-server": "~3.2.0",
         "illuminate/encryption": "^13.0",
-        "ramsey/uuid": "^4.7",
-        "ext-swoole": ">=6.2.1",
-        "ext-redis": "*"
+        "ramsey/uuid": "^4.7"
     },
     "require-dev": {
         "friendsofphp/php-cs-fixer": "^3.0",

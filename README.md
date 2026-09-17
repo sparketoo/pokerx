@@ -6,7 +6,7 @@
 | --- | --- |
 | HTTP API | http://127.0.0.1:18080 |
 | WebSocket | ws://127.0.0.1:18081/ |
-| 健康检查 | GET /health |
+| 健康检查 | GET /api/health |
 
 ## 启动
 
@@ -18,8 +18,8 @@
 
 APP_KEY 必须长期保持一致，否则已保存的双因素密钥和分页游标无法解密。
 
-最新迁移增加了 game_type 和牌局唯一约束：
-user_id + game_type + room_number + hand_number。
+最新迁移增加了 network 和牌局唯一约束：
+user_id + network + room_number + hand_number。
 已有库若有重复牌局，需先处理重复数据才能迁移。
 
 ## HTTP 通用约定
@@ -56,7 +56,7 @@ Token 由 user_tokens 表保存，格式为 id|secret；数据库只保存 secre
 
 ### 健康检查
 
-GET /health，无需鉴权：
+GET /api/health，无需鉴权：
 
     {"status":"ok"}
 
@@ -148,10 +148,10 @@ credits 为数据库中的积分余额，单位为最小积分单位。
 
 #### POST /api/mine/security/create_two_factor
 
-无请求字段。创建一个 5 分钟有效且绑定当前 Token 的临时设置。data：
+无请求字段。创建一个 5 分钟有效且绑定当前 Token 的临时设置。state 是加密状态，确认时必须原样提交；服务端不保存临时设置。data：
 
     {
-      "setup_id":"0c0d2ad0-a9a1-4f95-8b6a-853c435e1fb7",
+      "state":"encrypted-state",
       "secret":"BASE32SECRET",
       "otpauth_uri":"otpauth://totp/PokerX%3Aalice?secret=BASE32SECRET&issuer=PokerX"
     }
@@ -162,7 +162,7 @@ credits 为数据库中的积分余额，单位为最小积分单位。
 
 | 字段 | 类型 | 必填 | 说明 |
 | --- | --- | --- | --- |
-| setup_id | UUID | 是 | create_two_factor 返回的 ID |
+| state | string | 是 | create_two_factor 返回的绑定状态 |
 | current_password | string | 是 | 当前密码 |
 | code | string | 是 | 6 位 TOTP |
 
@@ -170,11 +170,7 @@ credits 为数据库中的积分余额，单位为最小积分单位。
 
 #### POST /api/mine/security/cancel_two_factor
 
-| 字段 | 类型 | 必填 | 说明 |
-| --- | --- | --- | --- |
-| setup_id | UUID | 是 | 要取消的临时设置 ID |
-
-只取消未确认的临时设置，不会关闭已启用的双因素认证。
+无请求字段。临时设置只保存在客户端的 state 中，取消即丢弃 state，不会关闭已启用的双因素认证。
 
 ### 列表查询和分页
 
@@ -187,7 +183,7 @@ credits 为数据库中的积分余额，单位为最小积分单位。
 | limit | integer | 1–100；不同接口有默认值 |
 | cursor | string | 上页返回的 next_cursor，必须原样传回 |
 
-next_cursor 为加密游标，不可自行解析、修改或跨账号使用。
+next_cursor 为 Hyperf 原生游标，必须原样传回；不要自行修改，也不要跨筛选条件使用。
 
 ### 游戏
 
@@ -198,7 +194,6 @@ next_cursor 为加密游标，不可自行解析、修改或跨账号使用。
 | 参数 | 类型 | 默认值 | 说明 |
 | --- | --- | --- | --- |
 | result | all / win / loss | all | 按 profit 筛选 |
-| snapshot | string | 无 | stats/summary 返回的快照 ID |
 
 普通查询默认每页 5 条：
 
@@ -209,7 +204,7 @@ next_cursor 为加密游标，不可自行解析、修改或跨账号使用。
           "uuid":"c69424e0-71bd-4711-8bb3-31b2ad650d55",
           "room_number":"6437707",
           "hand_number":81,
-          "game_type":"NL",
+          "network":"we",
           "provider":"proto",
           "status":"closed",
           "profit":null
@@ -219,7 +214,7 @@ next_cursor 为加密游标，不可自行解析、修改或跨账号使用。
       "pending":[]
     }
 
-snapshot 模式读取统计快照，返回 items、snapshot、next_cursor。game_over 后牌局进入 CLOSED，并以已写入的 winnings、bet_amount、profit 参与统计快照计算；本项目不使用 SETTLED 作为额外状态。
+游戏列表直接查询数据库。hand_over 后牌局进入 CLOSED，并以已写入的 winnings、bet_amount、profit 参与统计；本项目不使用 SETTLED 作为额外状态。
 
 #### GET /api/mine/games/detail?game_id=<UUID>
 
@@ -231,7 +226,7 @@ game_id 必填。响应：
       "pending":false
     }
 
-live 和 pending 来自 Redis 实时投影；没有实时投影时 live 为 null。找不到当前用户牌局时返回 not_found。
+该接口直接查询数据库；live 固定为 null、pending 固定为 false。找不到当前用户牌局时返回 not_found。
 
 #### GET /api/mine/games/events?game_id=<UUID>
 
@@ -249,7 +244,7 @@ game_id 必填。额外参数：
           "id":"42",
           "uuid":"client-event-id",
           "seq":1,
-          "type":"game_start",
+          "type":"hand_start",
           "payload":{},
           "created_at":"2026-09-12T12:00:00+00:00"
         }
@@ -257,20 +252,47 @@ game_id 必填。额外参数：
       "next_cursor":null
     }
 
+#### GET /api/mine/events
+
+查询当前用户的全部事件，并在每条事件中附带所属牌局的基础上下文。支持通用列表参数
+`cursor`、`limit`、`order`，以及可选的 `keyword`；关键字匹配事件类型与 JSON 载荷。
+
+    {
+      "items":[
+        {
+          "id":"42",
+          "uuid":"client-event-id",
+          "user_id":"1",
+          "game_id":"9",
+          "seq":1,
+          "type":"hand_start",
+          "payload":{},
+          "created_at":"2026-09-12T12:00:00+00:00",
+          "updated_at":"2026-09-12T12:00:00+00:00",
+          "game":{
+            "uuid":"c69424e0-71bd-4711-8bb3-31b2ad650d55",
+            "room_number":"6437707",
+            "hand_number":81,
+            "network":"we"
+          }
+        }
+      ],
+      "next_cursor":"encrypted-cursor-or-null"
+    }
+
 ### 统计
 
 #### GET /api/mine/stats/summary
 
-参数为 start、end、snapshot。时间范围不得超过 3660 天，未传日期时默认为当天。
+参数为 start、end。时间范围不得超过 3660 天，未传日期时默认为当天。
 
     {
       "lifetime":{"hands":0,"wins":0,"invested":0,"profit":0,"win_rate":null},
       "range":{"hands":0,"wins":0,"invested":0,"profit":0,"win_rate":null},
-      "snapshot":"a2c7da00-480d-4868-9fca-bb8b9c6c98ea",
       "as_of":"2026-09-12T12:00:00+00:00"
     }
 
-首次请求生成有效期 15 分钟的 Redis 快照。可把 snapshot 传给 trend 或 games 以使用同一数据集合。统计只计算 status=SETTLED 的游戏。
+每次请求直接计算数据库中的 status=CLOSED 牌局，不使用缓存。
 
 #### GET /api/mine/stats/trend
 
@@ -278,7 +300,6 @@ game_id 必填。额外参数：
 
     {
       "items":[{"label":"2026-09-12","delta":120,"cumulative":120}],
-      "snapshot":"a2c7da00-480d-4868-9fca-bb8b9c6c98ea",
       "as_of":"2026-09-12T12:00:00+00:00"
     }
 
@@ -292,16 +313,11 @@ game_id 必填。额外参数：
 
 #### GET /api/mine/credit
 
-从 Redis 实时状态读取：
+直接读取用户账户余额：
 
     {
-      "balance":1000,
-      "reserved":0,
-      "available":1000,
-      "sync_pending":false
+      "credit_balance":1000
     }
-
-当前用户没有 Redis 实时状态时返回 state_recovering。
 
 #### GET /api/mine/credit/record
 
@@ -345,7 +361,7 @@ game_id 必填。额外参数：
 
     {
       "id":"c753a3ce-26de-47e2-b249-b7db5654b944",
-      "type":"game_start",
+      "type":"hand_start",
       "timestamp":1789185600000,
       "payload":{}
     }
@@ -361,10 +377,10 @@ game_id 必填。额外参数：
 
     {
       "id":"server-uuid",
-      "type":"game_start.ack",
+      "type":"hand_start.ack",
       "timestamp":1789185600001,
       "reply_to":"c753a3ce-26de-47e2-b249-b7db5654b944",
-      "payload":{"game_uuid":"c69424e0-71bd-4711-8bb3-31b2ad650d55"}
+      "payload":{"hand_uuid":"c69424e0-71bd-4711-8bb3-31b2ad650d55"}
     }
 
 reply_to 对应客户端 id。成功接收游戏事件的回执名为事件名加 .ack；错误事件 type 为 error。当前版本未实现事件重传幂等，客户端不应重复发送已成功接收的事件。
@@ -379,57 +395,100 @@ reply_to 对应客户端 id。成功接收游戏事件的回执名为事件名�
 
     {"id":"server-uuid","type":"pong","timestamp":1789185600001,"reply_to":"77210ea4-7807-4788-9002-138542b8a5d9","payload":[]}
 
+### 扑克金额单位
+
+所有扑克金额（筹码、大小盲、前注、补盲、下注、底池、建议金额及结算）统一使用整数筹码。
+OK 原生数值、Game、PokerServer、数据库和 Provider 之间不做缩放，执行建议也直接使用整数。
+只有 `game.vue` 展示时除以 100，固定保留两位小数：例如协议金额 `125` 展示为 `$1.25`。
+PokerServer 仅接受 JSON 整数，拒绝小数、数字字符串、负数及超过 `9007199254740991` 的金额；
+大小盲和补盲必须大于零。Provider 的小数建议会被拒绝，不能截断后执行。
+原始建表迁移直接使用 BIGINT，金额字段非负、收益字段可为负；模型及金额计算同样使用整数。
+本次不兼容旧金额数据，不提供数据换算迁移。修改原迁移不会改变已创建的表；已有开发库需重建后才采用新字段类型。
+`player_acted.amount` 是本次实际投入，raise 也包含本次投入中的跟注部分；不是单独加注幅度。
+该单位规则不涉及积分，积分接口仍使用独立约定的最小单位。
+
 ### 游戏生命周期
 
 可用事件：
 
-    game_start
-    game_stage
-    game_play_acted
-    game_known_play_cards
-    game_request_action
-    game_over
+    hand_start
+    hand_refresh
+    force_bet
+    hand_card
+    stage_start
+    player_acted
+    known_play_cards
+    request_action
+    hand_over
 
 推荐顺序：
 
-    game_start
-      → game_stage / game_play_acted / game_known_play_cards / game_request_action ...
-      → game_over
+    hand_start
+      → force_bet
+      → hand_card
+      → stage_start / player_acted / known_play_cards / request_action ...
+      → hand_over
 
-game_start 回执的 payload.game_uuid 是服务端牌局标识。之后所有游戏事件必须在 payload.game_uuid 中携带它。服务端校验当前用户的牌局归属，并按接收顺序保存 events 和递增 seq。
+hand_start 回执的 payload.hand_uuid 是服务端牌局标识。之后所有游戏事件必须在 payload.hand_uuid 中携带它。服务端校验当前用户的牌局归属，并按接收顺序保存 events 和递增 seq。
 
-#### game_start
+#### hand_refresh
+
+`hand_refresh` 用于断线重连或中途开始采集时补交整局快照，因此不需要
+`hand_uuid`。`payload` 采用 `hand_start` 的全部开局字段，并额外携带按发生顺序排列的
+`events`；其中每项由 `type` 和 `payload` 组成。`events` 必须先包含初始化 `force_bet`，随后可追加仅含 `extra_bets` 的 `force_bet`，
+再包含唯一的 `hand_card`，之后才允许 `stage_start`、`player_acted`、`known_play_cards` 和 `hand_over`。
+`hand_over` 只能出现一次且必须在最后。
 
     {
       "id":"c753a3ce-26de-47e2-b249-b7db5654b944",
-      "type":"game_start",
+      "type":"hand_refresh",
       "timestamp":1789185600000,
       "payload":{
         "room_number":"6437707",
         "hand_number":81,
-        "provider":"proto",
-        "game_type":"NL",
-        "big_blind":100,
-        "small_blind":50,
-        "ante":0,
+        "network":"WE",
+        "players":[
+          {"seat":1,"name":"Hero","hero":true,"stack":10000,"seat_type":"SB"},
+          {"seat":2,"name":"Villain","hero":false,"stack":10000,"seat_type":"BB"}
+        ],
+        "events":[
+          {"type":"force_bet","payload":{"ante":0,"small_blind":50,"big_blind":100}},
+          {"type":"hand_card","payload":{"cards":["As","Qd"]}},
+          {"type":"stage_start","payload":{"stage":"preflop","cards":[]}},
+          {"type":"player_acted","payload":{"name":"Hero","action":"raise","amount":200}},
+          {"type":"hand_over","payload":{"winner":{"name":"Hero","amount":300}}}
+        ]
+      }
+    }
+
+服务端以当前用户的 `network + room_number + hand_number` 查找牌局：不存在时新建并扣除一次
+牌局积分；存在时保留原 `hand_uuid`，以该快照完整替换玩家、事件和汇总金额，不重复扣费。
+无论新建还是更新，都会返回 `hand_refresh.ack.payload.hand_uuid`。
+
+#### hand_start
+
+    {
+      "id":"c753a3ce-26de-47e2-b249-b7db5654b944",
+      "type":"hand_start",
+      "timestamp":1789185600000,
+      "payload":{
+        "room_number":"6437707",
+        "hand_number":81,
+        "network":"WE",
         "players":[
           {
             "seat":1,
             "name":"Hero",
             "hero":true,
             "stack":10000,
-            "seat_type":"SB",
-            "amount":null,
-            "cards":["As","Qd"]
+            "seat_type":"SB"
           },
           {
             "seat":2,
             "name":"Villain",
             "hero":false,
             "stack":10000,
-            "seat_type":"BB",
-            "amount":100,
-            "cards":[]
+            "seat_type":"BB"
           }
         ]
       }
@@ -439,102 +498,146 @@ game_start 回执的 payload.game_uuid 是服务端牌局标识。之后所有�
 | --- | --- | --- | --- |
 | room_number | string | 是 | 最长 64 字符 |
 | hand_number | integer | 是 | 最小 1 |
-| provider | string | 是 | 最长 32，例如 proto 或 mock |
-| game_type | string | 否 | 最长 32，默认 NL |
-| big_blind | number | 是 | 0.0001–9999999999.9999，最多 4 位小数 |
-| small_blind | number | 是 | 同上，且不大于 big_blind |
-| ante | number | 否 | 默认 0，最多 4 位小数 |
+| network | enum | 是 | 前端上报游戏平台；`OK`、`WE` |
 | players | array | 是 | 至少一名玩家 |
 | players[].seat | integer | 是 | 最小 1，数组内唯一 |
 | players[].name | string | 是 | 最长 64，数组内唯一 |
 | players[].hero | boolean | 是 | 是否本人 |
 | players[].stack | number | 是 | 非负，最多 4 位小数 |
 | players[].seat_type | string | 是 | SB、BB、BTN、UTG、UTG1、UTG2、MP、HJ、CO |
-| players[].amount | number/null | 是 | 非负，最多 4 位小数；当前保存原始开局 payload |
-| players[].cards | array | 否 | 已知手牌 |
 
 成功回执：
 
     {
-      "type":"game_start.ack",
+      "type":"hand_start.ack",
       "reply_to":"c753a3ce-26de-47e2-b249-b7db5654b944",
-      "payload":{"game_uuid":"c69424e0-71bd-4711-8bb3-31b2ad650d55"}
+      "payload":{"hand_uuid":"c69424e0-71bd-4711-8bb3-31b2ad650d55"}
     }
 
-同一用户的 game_type、room_number、hand_number 组合只能创建一局。
+`provider` 不接收前端指定值，始终采用后端 `POKER_PROVIDER` 的默认 Provider。
 
-#### game_stage
+同一用户的 network、room_number、hand_number 组合只能创建一局。
+
+#### force_bet
+
+    {
+      "id":"c2e11c7b-25a9-4e9f-bc4d-b5f862623a3f",
+      "type":"force_bet",
+      "timestamp":1789185600500,
+      "payload":{
+        "hand_uuid":"c69424e0-71bd-4711-8bb3-31b2ad650d55",
+        "ante":0,
+        "small_blind":50,
+        "big_blind":100
+      }
+    }
+
+首次 `force_bet` 必须紧跟 `hand_start`，`hand_uuid`、`small_blind`、`big_blind` 必填；
+`ante` 可选，默认 0。服务端根据座位类型写入大小盲，并更新底池与 Hero 投入。
+首次事件可附带 `extra_bets`，表示大小盲和统一前注之外的实际额外投入：
+
+    {"hand_uuid":"…","small_blind":50,"big_blind":100,"ante":0,
+     "extra_bets":[{"name":"Player3","type":"post","amount":100},
+                   {"name":"Player4","type":"straddle","amount":200}]}
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| extra_bets | array | 可选；出现时 1–18 项，按发生顺序排列 |
+| extra_bets[].name | string | 本手已声明的玩家名称 |
+| extra_bets[].type | string | `post`（入桌补盲）或 `straddle` |
+| extra_bets[].amount | number | 本次实际新增投入，必须是大于 0 的整数；不是累计桌面金额 |
+
+动态 Straddle 等后续强制投入继续使用 `force_bet`，但只能发送 `hand_uuid` 和非空
+`extra_bets`；不得重传 `small_blind`、`big_blind` 或 `ante`。允许在 `hand_card` 之前
+或 preflop 阶段追加，进入 flop 等后续阶段、牌局关闭后拒绝追加：
+
+    {"hand_uuid":"…","extra_bets":[{"name":"Player4","type":"straddle","amount":200}]}
+
+服务端将额外投入累加到底池；属于 Hero 的部分也累加到 Hero 投入。追加不会重新计入基础
+盲注，也不会更改牌桌名义大小盲。Proto Provider 按原始顺序输出 `blindPosted` 的
+`POST`、`STRADDLE`，统一前注输出每位玩家的 `ANTE`，不会将强制投入伪装成普通跟注。
+该映射依据 [Proto 协议](../proto/PROTOCOL.md#blindposted)；尚需真实上游联调确认执行效果。
+`hand_refresh` 同样保留这些强制投入和顺序。客户端事件仍无重传幂等，成功接收的增量不能重发。
+
+#### hand_card
+
+    {
+      "id":"d2e11c7b-25a9-4e9f-bc4d-b5f862623a3f",
+      "type":"hand_card",
+      "timestamp":1789185600750,
+      "payload":{
+        "hand_uuid":"c69424e0-71bd-4711-8bb3-31b2ad650d55",
+        "cards":["As","Qd"]
+      }
+    }
+
+hand_uuid 与两张 cards 必填。该事件只表示当前客户端的 Hero 手牌，因此不接收 name；服务端会
+写入 Hero 玩家记录。它必须在初始化 force_bet 后、普通行动及阶段事件前出现，且只能出现一次。
+
+#### stage_start
 
     {
       "id":"a2e11c7b-25a9-4e9f-bc4d-b5f862623a3f",
-      "type":"game_stage",
+      "type":"stage_start",
       "timestamp":1789185601000,
       "payload":{
-        "game_uuid":"c69424e0-71bd-4711-8bb3-31b2ad650d55",
+        "hand_uuid":"c69424e0-71bd-4711-8bb3-31b2ad650d55",
         "stage":"preflop",
         "cards":[]
       }
     }
 
-game_uuid 必填。当前版本保存完整 payload；Provider 使用 stage 和 cards 构建上游历史。回执为 game_stage.ack。
+hand_uuid 必填。当前版本保存完整 payload；Provider 使用 stage 和 cards 构建上游历史。回执为 stage_start.ack。
 
-#### game_play_acted
+#### player_acted
 
     {
       "id":"d6f20a72-0a24-4274-9f1a-6bf7f0b5d31f",
-      "type":"game_play_acted",
+      "type":"player_acted",
       "timestamp":1789185602000,
       "payload":{
-        "game_uuid":"c69424e0-71bd-4711-8bb3-31b2ad650d55",
+        "hand_uuid":"c69424e0-71bd-4711-8bb3-31b2ad650d55",
         "name":"Villain",
         "action":"raise",
         "amount":200
       }
     }
 
-game_uuid 必填。完整 payload 会被保存；Provider 读取 name、action、amount。回执为 game_play_acted.ack。
+hand_uuid 必填。完整 payload 会被保存；Provider 读取 name、action、amount。回执为 player_acted.ack。
 
-#### game_known_play_cards
+#### known_play_cards
 
     {
       "id":"c52f75c9-337d-4df8-a406-5d1adb2b345e",
-      "type":"game_known_play_cards",
+      "type":"known_play_cards",
       "timestamp":1789185603000,
       "payload":{
-        "game_uuid":"c69424e0-71bd-4711-8bb3-31b2ad650d55",
+        "hand_uuid":"c69424e0-71bd-4711-8bb3-31b2ad650d55",
         "name":"Villain",
         "cards":["Ks","Kd"]
       }
     }
 
-game_uuid 必填。完整 payload 会被保存；Provider 读取 name、cards。回执为 game_known_play_cards.ack。
+hand_uuid 必填。完整 payload 会被保存；Provider 读取 name、cards。回执为 known_play_cards.ack。
 
 #### game_request_action
 
     {
       "id":"c4c1a621-c03a-47d0-a528-1ab00c099c87",
-      "type":"game_request_action",
+      "type":"request_action",
       "timestamp":1789185604000,
-      "payload":{"game_uuid":"c69424e0-71bd-4711-8bb3-31b2ad650d55"}
+      "payload":{"hand_uuid":"c69424e0-71bd-4711-8bb3-31b2ad650d55"}
     }
 
-先收到接收回执：
-
-    {
-      "type":"game_request_action.ack",
-      "reply_to":"c4c1a621-c03a-47d0-a528-1ab00c099c87",
-      "payload":{"game_uuid":"c69424e0-71bd-4711-8bb3-31b2ad650d55"}
-    }
-
-Provider 成功后异步下发建议：
+Provider 成功后，服务端通过该事件的回执返回求解建议：
 
     {
       "id":"server-uuid",
-      "type":"game_play_action",
+      "type":"request_action.ack",
       "timestamp":1789185604500,
       "reply_to":"c4c1a621-c03a-47d0-a528-1ab00c099c87",
       "payload":{
-        "game_uuid":"c69424e0-71bd-4711-8bb3-31b2ad650d55",
+        "hand_uuid":"c69424e0-71bd-4711-8bb3-31b2ad650d55",
         "action":"raise",
         "amount":200
       }
@@ -542,26 +645,31 @@ Provider 成功后异步下发建议：
 
 action 可为 fold、check、call、bet、raise、all-in。只有这个事件会向 ProtoProvider 上游 WebSocket 发送求解请求。
 
-#### game_over
+#### hand_over
 
     {
       "id":"69bd1f44-4970-471d-8e51-c1d6ee03f0af",
-      "type":"game_over",
+      "type":"hand_over",
       "timestamp":1789185605000,
       "payload":{
-        "game_uuid":"c69424e0-71bd-4711-8bb3-31b2ad650d55",
+        "hand_uuid":"c69424e0-71bd-4711-8bb3-31b2ad650d55",
         "winner":{"name":"Hero","amount":2650},
         "shown":[{"name":"Hero","cards":["As","Qd"]}]
       }
     }
 
-game_uuid、winner.name、winner.amount 必填；shown 可选，出现时每项均须含 name 和两张 cards。成功后状态从 OPEN 变为 CLOSED（不会进入 SETTLED）；若 winner 是 Hero，则 winnings 为 winner.amount，否则为 0；profit = winnings - bet_amount。回执为 game_over.ack。
+hand_uuid、winner.name、winner.amount 必填；shown 可选，出现时每项均须含 name 和两张 cards。成功后状态从 OPEN 变为 CLOSED（不会进入 SETTLED）；若 winner 是 Hero，则 winnings 为 winner.amount，否则为 0；profit = winnings - bet_amount。回执为 hand_over.ack。
 
 ### Provider 连接模型
 
 PokerManager 和 Provider 均按 Hyperf Worker 常驻。首次使用 proto Provider 时，服务会启动到 PROTO_URL 的连接循环；连接断开后 SocketProvider 自动重连。一个连接可处理多局游戏，上游以 game_uuid（Proto 的 gameId）关联请求和响应。
+求解回调只结算一次；默认从受理请求起最多等待 20 秒，可通过 `PROTO_REQUEST_TIMEOUT`（秒）
+配置，必须是正有限数。超时返回 `solve_timeout`，断连或主动关闭返回 `provider_unavailable`，
+错误帧保留原请求的 `reply_to`。成功、失败、关闭都会清理回调及计时器，不自动重发。
+由于上游只用牌局 ID 关联响应，超时后会断开该上游连接，其他在途请求也返回连接不可用，
+连接循环随后重连；客户端可按当前行动机会手动重试。
 
-start、game_stage、game_play_acted、game_known_play_cards 的 Provider 空实现是当前设计；只有 game_request_action 会向上游发送请求。设置 POKER_PROVIDER=mock 可使用本地模拟 Provider。
+hand_card、stage_start、player_acted、known_play_cards 的 Provider 空实现是当前设计；只有 request_action 会向上游发送请求。设置 POKER_PROVIDER=mock 可使用本地模拟 Provider。
 
 ## 开发校验
 
@@ -569,4 +677,4 @@ start、game_stage、game_play_acted、game_known_play_cards 的 Provider 空实
     composer analyse
     composer pint
 
-发布前应使用独立 MySQL、Redis 和端口补充覆盖登录、WebSocket 建局、事件写入、game_over 状态与 Provider 回调的集成测试。
+发布前应使用独立 MySQL、Redis 和端口补充覆盖登录、WebSocket 建局、事件写入、hand_over 状态与 Provider 回调的集成测试。

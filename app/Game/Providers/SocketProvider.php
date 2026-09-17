@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Game\Providers;
 
+use App\Exception\PokerException;
 use App\Vo\Game\RequestActionResultVo;
 use Hyperf\Coroutine\Coroutine;
 use Hyperf\HttpMessage\Uri\Uri;
@@ -29,6 +30,9 @@ abstract class SocketProvider extends BaseProvider
      * @var array<string, \Closure(RequestActionResultVo): void>
      */
     protected array $requestActionCallbacks = [];
+
+    /** @var array<string, int> */
+    private array $requestActionTimers = [];
 
     /** @param  array<string, mixed>  $options */
     public function __construct(protected readonly array $options = []) {}
@@ -168,6 +172,7 @@ abstract class SocketProvider extends BaseProvider
     final public function close(): void
     {
         $this->session = null;
+        $this->rejectRequestActions();
         if ($this->socket !== null) {
             $this->disconnect($this->socket);
         }
@@ -208,6 +213,7 @@ abstract class SocketProvider extends BaseProvider
         $this->writer = null;
         $writer?->close();
         $socket->close();
+        $this->rejectRequestActions();
         try {
             $this->onClose();
         } catch (Throwable $error) {
@@ -229,17 +235,49 @@ abstract class SocketProvider extends BaseProvider
         return isset($this->requestActionCallbacks[$gameId]);
     }
 
+    /** @param \Closure(RequestActionResultVo): void $callback */
     protected function setRequestActionCallback(string $gameId, \Closure $callback): void
     {
+        if ($this->hasRequestActionCallback($gameId)) {
+            throw PokerException::solveInProgress();
+        }
         $this->requestActionCallbacks[$gameId] = $callback;
+        $timeout = (float) ($this->options['request_timeout'] ?? 20);
+        if (! is_finite($timeout) || $timeout <= 0) {
+            $timeout = 20;
+        }
+        $this->requestActionTimers[$gameId] = Timer::after(max(1, (int) ($timeout * 1000)), function () use ($gameId): void {
+            unset($this->requestActionTimers[$gameId]);
+            $this->callRequestActionCallback($gameId, RequestActionResultVo::failure(PokerException::solveTimeout()));
+            // The upstream correlates by gameId only. Retire this socket so an
+            // unanswered old request cannot resolve a later request on it.
+            if ($this->socket !== null) {
+                $this->disconnect($this->socket);
+            }
+        });
     }
 
     protected function callRequestActionCallback(string $gameId, RequestActionResultVo $result): void
     {
         $callback = $this->requestActionCallbacks[$gameId] ?? null;
-        if ($callback) {
-            $callback($result);
+        unset($this->requestActionCallbacks[$gameId]);
+        if (isset($this->requestActionTimers[$gameId])) {
+            Timer::clear($this->requestActionTimers[$gameId]);
+            unset($this->requestActionTimers[$gameId]);
         }
+        if ($callback !== null) {
+            try {
+                $callback($result);
+            } catch (Throwable $error) {
+                $this->report($error);
+            }
+        }
+    }
 
+    private function rejectRequestActions(): void
+    {
+        foreach (array_keys($this->requestActionCallbacks) as $gameId) {
+            $this->callRequestActionCallback($gameId, RequestActionResultVo::failure(PokerException::providerUnavailable()));
+        }
     }
 }

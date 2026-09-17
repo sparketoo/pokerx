@@ -5,13 +5,18 @@ declare(strict_types=1);
 use App\Constants\GameEvent;
 use App\Enum\ActionEnum;
 use App\Enum\GameStatusEnum;
+use App\Enum\NetworkEnum;
+use App\Exception\PokerException;
 use App\Game\PokerManager;
 use App\Game\PokerServer;
+use App\Game\Providers\BaseProvider;
 use App\Game\Providers\ProviderInterface;
 use App\Model\Game;
+use App\Model\UserToken;
 use App\Service\CreditService;
 use App\Service\GameService;
 use App\Service\UserTokenService;
+use App\Vo\Game\PokerServerMessageVo;
 use App\Vo\Game\RequestActionResultVo;
 use Hyperf\Stringable\Str;
 use Hyperf\Validation\Contract\ValidatorFactoryInterface;
@@ -72,7 +77,7 @@ afterEach(function (): void {
     Mockery::close();
 });
 
-it('dispatches game_start, persists it and acknowledges the client', function (): void {
+it('dispatches hand_start, persists it and acknowledges the client', function (): void {
     run(function (): void {
         $calls = [];
         $provider = new class($calls) implements ProviderInterface
@@ -111,13 +116,13 @@ it('dispatches game_start, persists it and acknowledges the client', function ()
             }
         };
         $manager = new PokerManager;
-        $manager->extend('spy', fn (): ProviderInterface => $provider);
+        $manager->extend($manager->getDefaultProvider(), fn (): ProviderInterface => $provider);
         $sender = new SenderSpy;
         $server = new PokerServer(
             $sender,
             $manager,
             new UserTokenService,
-            new GameService(new CreditService),
+            new GameService(new CreditService, $manager),
             di(ValidatorFactoryInterface::class),
             new NullLogger,
         );
@@ -128,31 +133,72 @@ it('dispatches game_start, persists it and acknowledges the client', function ()
         $server->onOpen($swoole, websocketOpenRequest(91, $token));
         $id = (string) Str::uuid();
         $server->onMessage($swoole, websocketFrame(91, json_encode([
-            'id' => $id, 'type' => GameEvent::GAME_START, 'timestamp' => (int) floor(microtime(true) * 1000),
+            'id' => $id, 'type' => GameEvent::HAND_START, 'timestamp' => (int) floor(microtime(true) * 1000),
             'payload' => [
-                'room_number' => 'ws-room', 'hand_number' => 1, 'provider' => 'spy', 'big_blind' => 100,
-                'small_blind' => 50, 'players' => [
-                    ['seat' => 1, 'name' => 'Hero', 'hero' => true, 'stack' => 1000, 'seat_type' => 'SB', 'amount' => null],
-                    ['seat' => 2, 'name' => 'Villain', 'hero' => false, 'stack' => 1000, 'seat_type' => 'BB', 'amount' => null],
+                'room_number' => 'ws-room', 'hand_number' => 1, 'provider' => 'client-supplied-provider', 'network' => 'WE', 'players' => [
+                    ['seat' => 1, 'name' => 'Hero', 'hero' => true, 'stack' => 1000, 'seat_type' => 'SB'],
+                    ['seat' => 2, 'name' => 'Villain', 'hero' => false, 'stack' => 1000, 'seat_type' => 'BB'],
                 ],
             ],
         ], JSON_THROW_ON_ERROR)));
 
-        expect($calls)->toBe(['start'])
+        expect($calls)->toBe([])
             ->and($sender->messages)->toHaveCount(1)
             ->and($sender->messages[0]['fd'])->toBe(91)
-            ->and($sender->messages[0]['message']['type'])->toBe('game_start.ack')
+            ->and($sender->messages[0]['message']['type'])->toBe('hand_start.ack')
             ->and($sender->messages[0]['message']['reply_to'])->toBe($id)
-            ->and(Game::query()->where('room_number', 'ws-room')->where('user_id', $user->id)->count())->toBe(1);
+            ->and(Game::query()->where('room_number', 'ws-room')->where('user_id', $user->id)->count())->toBe(1)
+            ->and(Game::query()->where('room_number', 'ws-room')->where('user_id', $user->id)->value('provider'))->toBe($manager->getDefaultProvider());
 
         /** @var Game $game */
         $game = Game::query()->where('room_number', 'ws-room')->where('user_id', $user->id)->firstOrFail();
+        $forceBetId = (string) Str::uuid();
+        $server->onMessage($swoole, websocketFrame(91, json_encode([
+            'id' => $forceBetId, 'type' => GameEvent::FORCE_BET, 'timestamp' => (int) floor(microtime(true) * 1000),
+            'payload' => ['hand_uuid' => $game->uuid, 'ante' => 5, 'small_blind' => 50, 'big_blind' => 100],
+        ], JSON_THROW_ON_ERROR)));
+        $handCardId = (string) Str::uuid();
+        $server->onMessage($swoole, websocketFrame(91, json_encode([
+            'id' => $handCardId, 'type' => GameEvent::HAND_CARD, 'timestamp' => (int) floor(microtime(true) * 1000),
+            'payload' => ['hand_uuid' => $game->uuid, 'cards' => ['As', 'Qd']],
+        ], JSON_THROW_ON_ERROR)));
+        $stageId = (string) Str::uuid();
+        $server->onMessage($swoole, websocketFrame(91, json_encode([
+            'id' => $stageId, 'type' => GameEvent::STAGE_START, 'timestamp' => (int) floor(microtime(true) * 1000),
+            'payload' => ['hand_uuid' => $game->uuid, 'stage' => 'preflop', 'cards' => []],
+        ], JSON_THROW_ON_ERROR)));
+
+        $game->refresh()->load('players');
+        expect($calls)->toBe(['start', 'stage'])
+            ->and($sender->messages)->toHaveCount(4)
+            ->and($sender->messages[1]['message']['type'])->toBe('force_bet.ack')
+            ->and($sender->messages[1]['message']['reply_to'])->toBe($forceBetId)
+            ->and($sender->messages[2]['message']['type'])->toBe('hand_card.ack')
+            ->and($sender->messages[2]['message']['reply_to'])->toBe($handCardId)
+            ->and($sender->messages[3]['message']['type'])->toBe('stage_start.ack')
+            ->and($sender->messages[3]['message']['reply_to'])->toBe($stageId)
+            ->and($game->big_blind)->toBe(100)
+            ->and($game->small_blind)->toBe(50)
+            ->and($game->ante)->toBe(5)
+            ->and($game->pot)->toBe(160)
+            ->and($game->bet_amount)->toBe(55)
+            ->and($game->hero()->cards)->toBe(['As', 'Qd'])
+            ->and($game->events()->count())->toBe(4);
+
         $invalidEvents = [
-            [GameEvent::GAME_STAGE, ['game_uuid' => $game->uuid, 'stage' => 'invalid', 'cards' => []]],
-            [GameEvent::GAME_PLAY_ACTED, ['game_uuid' => $game->uuid, 'name' => 'Hero', 'action' => 'raise']],
-            [GameEvent::GAME_KNOWN_PLAY_CARDS, ['game_uuid' => $game->uuid, 'name' => 'Hero', 'cards' => ['As']]],
-            [GameEvent::GAME_REQUEST_ACTION, ['game_uuid' => 'not-a-uuid']],
-            [GameEvent::GAME_OVER, ['game_uuid' => $game->uuid, 'winner' => ['name' => 'Hero']]],
+            [GameEvent::HAND_START, ['room_number' => 'fractional', 'hand_number' => 1, 'network' => 'OK', 'players' => [['seat' => 1, 'name' => 'Hero', 'hero' => true, 'stack' => 1.25, 'seat_type' => 'SB']]]],
+            [GameEvent::FORCE_BET, ['hand_uuid' => $game->uuid, 'small_blind' => 0.5, 'big_blind' => 1]],
+            [GameEvent::FORCE_BET, ['hand_uuid' => $game->uuid, 'extra_bets' => [['name' => 'Hero', 'type' => 'post', 'amount' => 0.02]]]],
+            [GameEvent::PLAYER_ACTED, ['hand_uuid' => $game->uuid, 'name' => 'Hero', 'action' => 'raise', 'amount' => 1.25]],
+            [GameEvent::PLAYER_ACTED, ['hand_uuid' => $game->uuid, 'name' => 'Hero', 'action' => 'raise', 'amount' => '2']],
+            [GameEvent::HAND_OVER, ['hand_uuid' => $game->uuid, 'winner' => ['name' => 'Hero', 'amount' => 2.5]]],
+            [GameEvent::FORCE_BET, ['hand_uuid' => $game->uuid, 'small_blind' => 50, 'big_blind' => 100]],
+            [GameEvent::HAND_CARD, ['hand_uuid' => $game->uuid, 'cards' => ['As', 'Qd']]],
+            [GameEvent::STAGE_START, ['hand_uuid' => $game->uuid, 'stage' => 'invalid', 'cards' => []]],
+            [GameEvent::PLAYER_ACTED, ['hand_uuid' => $game->uuid, 'name' => 'Hero', 'action' => 'raise']],
+            [GameEvent::KNOWN_PLAY_CARDS, ['hand_uuid' => $game->uuid, 'name' => 'Hero', 'cards' => ['As']]],
+            [GameEvent::REQUEST_ACTION, ['hand_uuid' => 'not-a-uuid']],
+            [GameEvent::HAND_OVER, ['hand_uuid' => $game->uuid, 'winner' => ['name' => 'Hero']]],
         ];
         foreach ($invalidEvents as [$type, $payload]) {
             $server->onMessage($swoole, websocketFrame(91, json_encode([
@@ -161,17 +207,17 @@ it('dispatches game_start, persists it and acknowledges the client', function ()
             ], JSON_THROW_ON_ERROR)));
         }
 
-        expect($calls)->toBe(['start'])
-            ->and($sender->messages)->toHaveCount(6)
-            ->and($game->events()->count())->toBe(1);
-        foreach (array_slice($sender->messages, 1) as $response) {
+        expect($calls)->toBe(['start', 'stage'])
+            ->and($sender->messages)->toHaveCount(4 + count($invalidEvents))
+            ->and($game->events()->count())->toBe(4);
+        foreach (array_slice($sender->messages, 4) as $response) {
             expect($response['message']['type'])->toBe('error')
                 ->and($response['message']['payload']['code'])->toBe('event_invalid');
         }
     });
 });
 
-it('persists follow-up events and sends the provider action in wire format', function (): void {
+it('returns the provider action in the request_action acknowledgement', function (): void {
     run(function (): void {
         $provider = new class implements ProviderInterface
         {
@@ -210,9 +256,9 @@ it('persists follow-up events and sends the provider action in wire format', fun
             }
         };
         $manager = new PokerManager;
-        $manager->extend('spy', fn (): ProviderInterface => $provider);
+        $manager->extend($manager->getDefaultProvider(), fn (): ProviderInterface => $provider);
         $sender = new SenderSpy;
-        $server = new PokerServer($sender, $manager, new UserTokenService, new GameService(new CreditService), di(ValidatorFactoryInterface::class), new NullLogger);
+        $server = new PokerServer($sender, $manager, new UserTokenService, new GameService(new CreditService, $manager), di(ValidatorFactoryInterface::class), new NullLogger);
         $user = TestData::user();
         $token = TestData::token($user);
         $swoole = Mockery::mock();
@@ -220,30 +266,38 @@ it('persists follow-up events and sends the provider action in wire format', fun
         $server->onOpen($swoole, websocketOpenRequest(92, $token));
 
         $startId = (string) Str::uuid();
-        $start = ['id' => $startId, 'type' => GameEvent::GAME_START, 'timestamp' => (int) floor(microtime(true) * 1000), 'payload' => [
-            'room_number' => 'ws-action-room', 'hand_number' => 1, 'provider' => 'spy', 'big_blind' => 100, 'small_blind' => 50,
+        $start = ['id' => $startId, 'type' => GameEvent::HAND_START, 'timestamp' => (int) floor(microtime(true) * 1000), 'payload' => [
+            'room_number' => 'ws-action-room', 'hand_number' => 1, 'network' => 'WE',
             'players' => [
-                ['seat' => 1, 'name' => 'Hero', 'hero' => true, 'stack' => 1000, 'seat_type' => 'SB', 'amount' => null],
-                ['seat' => 2, 'name' => 'Villain', 'hero' => false, 'stack' => 1000, 'seat_type' => 'BB', 'amount' => null],
+                ['seat' => 1, 'name' => 'Hero', 'hero' => true, 'stack' => 1000, 'seat_type' => 'SB'],
+                ['seat' => 2, 'name' => 'Villain', 'hero' => false, 'stack' => 1000, 'seat_type' => 'BB'],
             ],
         ]];
         $server->onMessage($swoole, websocketFrame(92, json_encode($start, JSON_THROW_ON_ERROR)));
-        $uuid = $sender->messages[0]['message']['payload']['game_uuid'];
+        $uuid = $sender->messages[0]['message']['payload']['hand_uuid'];
+        $server->onMessage($swoole, websocketFrame(92, json_encode([
+            'id' => (string) Str::uuid(), 'type' => GameEvent::FORCE_BET, 'timestamp' => (int) floor(microtime(true) * 1000),
+            'payload' => ['hand_uuid' => $uuid, 'small_blind' => 50, 'big_blind' => 100],
+        ], JSON_THROW_ON_ERROR)));
+        $server->onMessage($swoole, websocketFrame(92, json_encode([
+            'id' => (string) Str::uuid(), 'type' => GameEvent::HAND_CARD, 'timestamp' => (int) floor(microtime(true) * 1000),
+            'payload' => ['hand_uuid' => $uuid, 'cards' => ['As', 'Qd']],
+        ], JSON_THROW_ON_ERROR)));
         $actedId = (string) Str::uuid();
         $server->onMessage($swoole, websocketFrame(92, json_encode([
-            'id' => $actedId, 'type' => GameEvent::GAME_PLAY_ACTED, 'timestamp' => (int) floor(microtime(true) * 1000),
-            'payload' => ['game_uuid' => $uuid, 'name' => 'Hero', 'action' => 'raise', 'amount' => 100],
+            'id' => $actedId, 'type' => GameEvent::PLAYER_ACTED, 'timestamp' => (int) floor(microtime(true) * 1000),
+            'payload' => ['hand_uuid' => $uuid, 'name' => 'Hero', 'action' => 'raise', 'amount' => 100],
         ], JSON_THROW_ON_ERROR)));
         $requestId = (string) Str::uuid();
         $server->onMessage($swoole, websocketFrame(92, json_encode([
-            'id' => $requestId, 'type' => GameEvent::GAME_REQUEST_ACTION, 'timestamp' => (int) floor(microtime(true) * 1000),
-            'payload' => ['game_uuid' => $uuid],
+            'id' => $requestId, 'type' => GameEvent::REQUEST_ACTION, 'timestamp' => (int) floor(microtime(true) * 1000),
+            'payload' => ['hand_uuid' => $uuid],
         ], JSON_THROW_ON_ERROR)));
         $overId = (string) Str::uuid();
         $server->onMessage($swoole, websocketFrame(92, json_encode([
-            'id' => $overId, 'type' => GameEvent::GAME_OVER, 'timestamp' => (int) floor(microtime(true) * 1000),
+            'id' => $overId, 'type' => GameEvent::HAND_OVER, 'timestamp' => (int) floor(microtime(true) * 1000),
             'payload' => [
-                'game_uuid' => $uuid,
+                'hand_uuid' => $uuid,
                 'winner' => ['name' => 'Hero', 'amount' => 300],
                 'shown' => [['name' => 'Hero', 'cards' => ['As', 'Qd']]],
             ],
@@ -252,18 +306,122 @@ it('persists follow-up events and sends the provider action in wire format', fun
         $game = Game::query()->where('uuid', $uuid)->firstOrFail();
 
         expect($provider->calls)->toBe(['start', 'acted', 'request', 'over'])
-            ->and($sender->messages[1]['message']['type'])->toBe('game_play_acted.ack')
-            ->and($sender->messages[1]['message']['reply_to'])->toBe($actedId)
-            ->and($sender->messages[2]['message']['type'])->toBe('game_play_action')
-            ->and($sender->messages[2]['message']['payload'])->toMatchArray(['game_uuid' => $uuid, 'action' => 'all-in', 'amount' => 900])
-            ->and($sender->messages[3]['message']['type'])->toBe('game_request_action.ack')
-            ->and($sender->messages[4]['message']['type'])->toBe('game_over.ack')
-            ->and($sender->messages[4]['message']['reply_to'])->toBe($overId)
-            ->and($game->pot)->toBe(250.0)
-            ->and($game->bet_amount)->toBe(150.0)
+            ->and($sender->messages[3]['message']['type'])->toBe('player_acted.ack')
+            ->and($sender->messages[3]['message']['reply_to'])->toBe($actedId)
+            ->and($sender->messages)->toHaveCount(6)
+            ->and($sender->messages[4]['message']['type'])->toBe('request_action.ack')
+            ->and($sender->messages[4]['message']['reply_to'])->toBe($requestId)
+            ->and($sender->messages[4]['message']['payload'])->toMatchArray(['hand_uuid' => $uuid, 'action' => 'all-in', 'amount' => 900])
+            ->and($sender->messages[5]['message']['type'])->toBe('hand_over.ack')
+            ->and($sender->messages[5]['message']['reply_to'])->toBe($overId)
+            ->and($game->pot)->toBe(250)
+            ->and($game->bet_amount)->toBe(150)
             ->and($game->status)->toBe(GameStatusEnum::CLOSED)
-            ->and($game->winnings)->toBe(300.0)
-            ->and($game->profit)->toBe(150.0)
-            ->and($game->events()->count())->toBe(4);
+            ->and($game->winnings)->toBe(300)
+            ->and($game->profit)->toBe(150)
+            ->and($game->events()->count())->toBe(6);
+    });
+});
+
+it('upserts a hand refresh and returns the stable hand UUID in its acknowledgement', function (): void {
+    run(function (): void {
+        $provider = new class extends BaseProvider
+        {
+            /** @var list<string> */
+            public array $calls = [];
+
+            public function requestAction(Game $game, Closure $callback): void {}
+
+            public function over(Game $game): void
+            {
+                $this->calls[] = 'over';
+            }
+        };
+        $manager = new PokerManager;
+        $manager->extend($manager->getDefaultProvider(), fn (): ProviderInterface => $provider);
+        $sender = new SenderSpy;
+        $server = new PokerServer(
+            $sender,
+            $manager,
+            new UserTokenService,
+            new GameService(new CreditService, $manager),
+            di(ValidatorFactoryInterface::class),
+            new NullLogger,
+        );
+        $user = TestData::user();
+        $token = TestData::token($user);
+        $swoole = Mockery::mock();
+        $swoole->shouldReceive('disconnect')->never();
+        $server->onOpen($swoole, websocketOpenRequest(93, $token));
+
+        $payload = [
+            'room_number' => 'full-ws-room', 'hand_number' => 1, 'network' => 'WE',
+            'players' => [
+                ['seat' => 1, 'name' => 'Hero', 'hero' => true, 'stack' => 1000, 'seat_type' => 'SB'],
+                ['seat' => 2, 'name' => 'Villain', 'hero' => false, 'stack' => 1000, 'seat_type' => 'BB'],
+            ],
+            'events' => [
+                ['type' => GameEvent::FORCE_BET, 'payload' => ['small_blind' => 50, 'big_blind' => 100]],
+                ['type' => GameEvent::HAND_CARD, 'payload' => ['cards' => ['As', 'Qd']]],
+                ['type' => GameEvent::PLAYER_ACTED, 'payload' => ['name' => 'Hero', 'action' => 'raise', 'amount' => 100]],
+            ],
+        ];
+        $firstId = (string) Str::uuid();
+        $server->onMessage($swoole, websocketFrame(93, json_encode([
+            'id' => $firstId, 'type' => GameEvent::HAND_REFRESH, 'timestamp' => (int) floor(microtime(true) * 1000), 'payload' => $payload,
+        ], JSON_THROW_ON_ERROR)));
+        $uuid = $sender->messages[0]['message']['payload']['hand_uuid'];
+
+        $payload['events'][] = [
+            'type' => GameEvent::HAND_OVER,
+            'payload' => ['winner' => ['name' => 'Hero', 'amount' => 300]],
+        ];
+        $secondId = (string) Str::uuid();
+        $server->onMessage($swoole, websocketFrame(93, json_encode([
+            'id' => $secondId, 'type' => GameEvent::HAND_REFRESH, 'timestamp' => (int) floor(microtime(true) * 1000), 'payload' => $payload,
+        ], JSON_THROW_ON_ERROR)));
+
+        $game = Game::query()->where('uuid', $uuid)->firstOrFail();
+        expect($sender->messages[0]['message']['type'])->toBe('hand_refresh.ack')
+            ->and($sender->messages[0]['message']['reply_to'])->toBe($firstId)
+            ->and($sender->messages[1]['message']['type'])->toBe('hand_refresh.ack')
+            ->and($sender->messages[1]['message']['reply_to'])->toBe($secondId)
+            ->and($sender->messages[1]['message']['payload']['hand_uuid'])->toBe($uuid)
+            ->and(Game::query()->where('user_id', $user->id)->where('room_number', 'full-ws-room')->count())->toBe(1)
+            ->and($game->status)->toBe(GameStatusEnum::CLOSED)
+            ->and($game->events()->count())->toBe(5)
+            ->and($provider->calls)->toBe(['over']);
+    });
+});
+
+it('correlates provider failures and preserves their error codes', function (): void {
+    run(function (): void {
+        $provider = new class extends BaseProvider
+        {
+            public function requestAction(Game $game, Closure $callback): void
+            {
+                $callback(RequestActionResultVo::failure(PokerException::solveTimeout()));
+            }
+        };
+        $manager = new PokerManager;
+        $manager->extend($manager->getDefaultProvider(), fn (): ProviderInterface => $provider);
+        $service = new GameService(new CreditService, $manager);
+        $sender = new SenderSpy;
+        $server = new PokerServer($sender, $manager, new UserTokenService, $service, di(ValidatorFactoryInterface::class), new NullLogger);
+        $user = TestData::user();
+        TestData::token($user);
+        $token = UserToken::query()->where('user_id', $user->id)->firstOrFail();
+        $players = [
+            ['seat' => 1, 'name' => 'Hero', 'hero' => true, 'stack' => 1000, 'seat_type' => 'SB'],
+            ['seat' => 2, 'name' => 'Villain', 'hero' => false, 'stack' => 1000, 'seat_type' => 'BB'],
+        ];
+        $game = $service->create($user, 'failed-action-room', 1, $players, (string) Str::uuid(), [], NetworkEnum::OK);
+        $service->append($user, $game->uuid, (string) Str::uuid(), GameEvent::FORCE_BET, ['small_blind' => 50, 'big_blind' => 100]);
+        $service->append($user, $game->uuid, (string) Str::uuid(), GameEvent::HAND_CARD, ['cards' => ['As', 'Qd']]);
+        $id = (string) Str::uuid();
+        $server->handleRequestAction(new PokerServerMessageVo(99, $user, $token, $id, GameEvent::REQUEST_ACTION, ['hand_uuid' => $game->uuid], 0));
+        expect($sender->messages)->toHaveCount(1)
+            ->and($sender->messages[0]['message']['reply_to'] ?? null)->toBe($id)
+            ->and($sender->messages[0]['message']['payload']['code'])->toBe('solve_timeout');
     });
 });

@@ -61,51 +61,58 @@ final class MockProvider extends BaseProvider
         }
 
         foreach ($game->events->sortBy('seq') as $event) {
-            if ($event->type === GameEvent::GAME_STAGE) {
+            if ($event->type === GameEvent::STAGE_START) {
                 if (($event->payload['stage'] ?? null) !== 'preflop') {
                     $roundBets = array_fill_keys(array_keys($roundBets), 0);
                 }
 
                 continue;
             }
-            if ($event->type !== GameEvent::GAME_PLAY_ACTED) {
+            if ($event->type === GameEvent::FORCE_BET) {
+                foreach ($event->payload['extra_bets'] ?? [] as $bet) {
+                    $name = $bet['name'];
+                    if (isset($roundBets[$name])) {
+                        $paid = min((int) $bet['amount'], $remainingStacks[$name]);
+                        $roundBets[$name] = $roundBets[$name] + $paid;
+                        $remainingStacks[$name] = $remainingStacks[$name] - $paid;
+                    }
+                }
+            }
+            if ($event->type !== GameEvent::PLAYER_ACTED) {
                 continue;
             }
 
             $name = $event->payload['name'] ?? null;
             $action = is_string($event->payload['action'] ?? null)
-                ? ActionEnum::fromName(strtoupper($event->payload['action']))
+                ? ActionEnum::fromName(strtoupper(str_replace('-', '_', $event->payload['action'])))
                 : null;
             if (! is_string($name) || $action === null || ! isset($roundBets[$name])) {
                 continue;
             }
 
             $amount = (int) ($event->payload['amount'] ?? 0);
-            $toCall = $this->highestRoundBet($roundBets) - $roundBets[$name];
             $paid = match ($action) {
                 ActionEnum::FOLD, ActionEnum::CHECK => 0,
-                ActionEnum::CALL, ActionEnum::BET => $amount,
-                ActionEnum::RAISE => $toCall + $amount,
-                ActionEnum::ALL_IN => $remainingStacks[$name],
+                default => $amount,
             };
             $paid = min(max(0, $paid), $remainingStacks[$name]);
-            $roundBets[$name] += $paid;
-            $remainingStacks[$name] -= $paid;
+            $roundBets[$name] = $roundBets[$name] + $paid;
+            $remainingStacks[$name] = $remainingStacks[$name] - $paid;
         }
 
         $hero = $game->hero();
         $call = $this->highestRoundBet($roundBets) - $roundBets[$hero->name];
         $remainingStack = $remainingStacks[$hero->name];
 
-        return $call === 0
+        return $call == 0
             ? RequestActionResultVo::success(ActionEnum::CHECK, 0)
             : ($call < $remainingStack
-                ? RequestActionResultVo::success(ActionEnum::CALL, (int) $call)
-                : RequestActionResultVo::success(ActionEnum::ALL_IN, (int) $remainingStack));
+                ? RequestActionResultVo::success(ActionEnum::CALL, $call)
+                : RequestActionResultVo::success(ActionEnum::ALL_IN, $remainingStack));
     }
 
-    /** @param array<string, float|int> $roundBets */
-    private function highestRoundBet(array $roundBets): float|int
+    /** @param array<string, int> $roundBets */
+    private function highestRoundBet(array $roundBets): int
     {
         return $roundBets === [] ? 0 : max($roundBets);
     }

@@ -20,13 +20,13 @@ class AuthController extends ApiController
     {
         $account = $request->account();
         $password = $request->password();
-        $code = $request->code();
+        $twoFactorCode = $request->twoFactorCode();
         $user = User::query()->where('account', strtolower(trim($account)))->first();
         if (! $user || ! $user->status->isNormal() || ! password_verify($password, $user->password)) {
             throw AuthException::authFailed();
         }
 
-        $this->verifyCode($user, $code);
+        $this->verifyCode($user, $twoFactorCode);
         $expires = now()->addDays(config('poker.token_days'));
         $plainToken = $tokens->createToken($user, 'chrome', ['*'], $expires)->plainTextToken;
 

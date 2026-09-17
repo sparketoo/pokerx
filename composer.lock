@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "d28e619ef1110e0e2227ca8a8e345f06",
+    "content-hash": "c5731b37779d03aaaa532a6d3050efa6",
     "packages": [
         {
             "name": "brick/math",
@@ -3149,6 +3149,76 @@
                 "model-listener",
                 "php",
                 "swoole"
+            ],
+            "support": {
+                "docs": "https://hyperf.wiki",
+                "issues": "https://github.com/hyperf/hyperf/issues",
+                "pull-request": "https://github.com/hyperf/hyperf/pulls",
+                "source": "https://github.com/hyperf/hyperf"
+            },
+            "funding": [
+                {
+                    "url": "https://hyperf.wiki/#/zh-cn/donate",
+                    "type": "custom"
+                },
+                {
+                    "url": "https://opencollective.com/hyperf",
+                    "type": "open_collective"
+                }
+            ],
+            "time": "2026-06-07T09:04:32+00:00"
+        },
+        {
+            "name": "hyperf/paginator",
+            "version": "v3.2.0",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/hyperf/paginator.git",
+                "reference": "3df542552c6a07769023d4791f7c853231e989c6"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://api.github.com/repos/hyperf/paginator/zipball/3df542552c6a07769023d4791f7c853231e989c6",
+                "reference": "3df542552c6a07769023d4791f7c853231e989c6",
+                "shasum": ""
+            },
+            "require": {
+                "hyperf/collection": "~3.2.0",
+                "hyperf/context": "~3.2.0",
+                "hyperf/contract": "~3.2.0",
+                "hyperf/stringable": "~3.2.0",
+                "hyperf/support": "~3.2.0",
+                "php": ">=8.2"
+            },
+            "suggest": {
+                "hyperf/event": "Reqiured to use PageResolverListener.",
+                "hyperf/framework": "Reqiured to use PageResolverListener.",
+                "hyperf/http-server": "Reqiured to use PageResolverListener."
+            },
+            "type": "library",
+            "extra": {
+                "hyperf": {
+                    "config": "Hyperf\\Paginator\\ConfigProvider"
+                },
+                "branch-alias": {
+                    "dev-master": "3.2-dev"
+                }
+            },
+            "autoload": {
+                "psr-4": {
+                    "Hyperf\\Paginator\\": "src/"
+                }
+            },
+            "notification-url": "https://packagist.org/downloads/",
+            "license": [
+                "MIT"
+            ],
+            "description": "A paginator component for hyperf.",
+            "homepage": "https://hyperf.io",
+            "keywords": [
+                "hyperf",
+                "paginator",
+                "php"
             ],
             "support": {
                 "docs": "https://hyperf.wiki",
@@ -12502,8 +12572,8 @@
     "prefer-lowest": false,
     "platform": {
         "php": "^8.4",
-        "ext-swoole": ">=6.2.1",
-        "ext-redis": "*"
+        "ext-redis": "*",
+        "ext-swoole": ">=6.2.1"
     },
     "platform-dev": {},
     "plugin-api-version": "2.9.0"

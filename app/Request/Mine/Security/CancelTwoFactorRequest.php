@@ -13,11 +13,19 @@ class CancelTwoFactorRequest extends FormRequest
      */
     public function rules(): array
     {
-        return ['setup_id' => 'required|uuid'];
+        return [
+            'current_password' => 'required|string',
+            'code' => 'required|string|digits:6',
+        ];
     }
 
-    public function setupId(): string
+    public function currentPassword(): string
     {
-        return $this->requiredText('setup_id', '');
+        return $this->validate('current_password');
+    }
+
+    public function code(): string
+    {
+        return $this->validate('code');
     }
 }

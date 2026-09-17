@@ -18,6 +18,6 @@ class UpdateNicknameRequest extends FormRequest
 
     public function nickname(): string
     {
-        return $this->requiredText('nickname', '');
+        return $this->validate('nickname');
     }
 }

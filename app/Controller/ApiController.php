@@ -14,7 +14,6 @@ use Hyperf\Context\Context;
 use Hyperf\DbConnection\Model\Model;
 use Hyperf\HttpServer\Contract\ResponseInterface;
 use Hyperf\HttpServer\Request;
-use Hyperf\Redis\Redis;
 use Psr\Http\Message\ResponseInterface as JsonResponse;
 use UnitEnum;
 
@@ -90,9 +89,7 @@ abstract class ApiController extends AbstractController
         if (! $code) {
             throw AuthException::twoFactorRequired();
         }
-        $counter = di(TotpService::class)->counter($user->two_factor_secret, $code);
-        $key = 'totp:'.$user->id.':'.hash('sha256', $user->two_factor_secret).':'.$counter;
-        if ($counter === null || ! di(Redis::class)->set($key, '1', ['nx', 'ex' => 120])) {
+        if (di(TotpService::class)->counter($user->two_factor_secret, $code) === null) {
             throw AuthException::twoFactorInvalid();
         }
     }

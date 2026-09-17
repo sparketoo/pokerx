@@ -16,7 +16,6 @@ use Hyperf\Stringable\Str;
 use Swoole\Coroutine;
 use Throwable;
 
-
 final class ProtoProvider extends SocketJsonProvider
 {
     private bool $authenticated = false;
@@ -80,6 +79,13 @@ final class ProtoProvider extends SocketJsonProvider
      */
     public function handlePlayerAction(array $message): void
     {
+        // Keep the exact advice amount/type visible when validation rejects a provider response.
+        $this->logger()->info('Proto advice received', [
+            'game_id' => $message['gameId'] ?? null,
+            'action' => $message['action'] ?? null,
+            'amount' => $message['amount'] ?? null,
+            'amount_type' => get_debug_type($message['amount'] ?? null),
+        ]);
         if (! $this->hasRequestActionCallback($message['gameId'])) {
             return;
         }
@@ -90,27 +96,33 @@ final class ProtoProvider extends SocketJsonProvider
 
             return;
         }
-        if (empty($message['action'])) {
+        if (! is_string($message['action'] ?? null) || $message['action'] === '') {
             $this->callRequestActionCallback($message['gameId'], RequestActionResultVo::failure(PokerException::providerRejected()));
 
             return;
         }
-        $action = match ($message['action']) {
+        // Live Proto responses use both all-in and all-In; keep our action names canonical.
+        $action = match (strtolower($message['action'])) {
             'fold' => ActionEnum::FOLD,
             'call' => ActionEnum::CALL,
+            'bet' => ActionEnum::BET,
             'raise' => ActionEnum::RAISE,
             'all-in' => ActionEnum::ALL_IN,
             'check' => ActionEnum::CHECK,
             default => null,
         };
-        if (empty($action)) {
+        if ($action === null) {
+            $this->callRequestActionCallback($message['gameId'], RequestActionResultVo::failure(PokerException::providerRejected()));
+
             return;
         }
 
-        $this->callRequestActionCallback(
-            $message['gameId'],
-            RequestActionResultVo::success($action, $message['amount'] ?? 0),
-        );
+        try {
+            $result = RequestActionResultVo::success($action, $message['amount'] ?? 0);
+        } catch (\InvalidArgumentException|\TypeError) {
+            $result = RequestActionResultVo::failure(PokerException::providerRejected());
+        }
+        $this->callRequestActionCallback($message['gameId'], $result);
     }
 
     public function requestAction(Game $game, \Closure $callback): void
@@ -122,6 +134,9 @@ final class ProtoProvider extends SocketJsonProvider
         if (! $this->awaitAuthenticated((float) ($this->options['connect_timeout'] ?? 10))) {
             $this->callRequestActionCallback($game->uuid, RequestActionResultVo::failure(PokerException::providerRejected()));
 
+            return;
+        }
+        if (($this->requestActionCallbacks[$game->uuid] ?? null) !== $callback) {
             return;
         }
         $synced = $this->send($this->gameEvents($game));
@@ -182,27 +197,54 @@ final class ProtoProvider extends SocketJsonProvider
                 'stack' => $player->stack,
             ];
         }
-        foreach ($game->players as $player) {
-
-            if ($player->seat_type->isBlind()) {
-                $events[] = [
-                    'eventType' => 'blindPosted',
-                    'name' => $player->name,
-                    'blindType' => $player->seat_type->name,
-                    'amount' => $player->blind_amount,
-                ];
-            }
-        }
-
         foreach ($game->events as $event) {
             $payload = $event->payload;
             switch ($event->type) {
-                case GameEvent::GAME_STAGE:
+                case GameEvent::FORCE_BET:
+                    if (isset($payload['big_blind'])) {
+                        foreach ($game->players as $player) {
+                            if (($payload['ante'] ?? 0) > 0) {
+                                $events[] = [
+                                    'eventType' => 'blindPosted',
+                                    'name' => $player->name,
+                                    'blindType' => 'ANTE',
+                                    'amount' => (int) $payload['ante'],
+                                ];
+                            }
+                        }
+                        foreach ($game->players as $player) {
+                            if ($player->seat_type->isBlind()) {
+                                $events[] = [
+                                    'eventType' => 'blindPosted',
+                                    'name' => $player->name,
+                                    'blindType' => $player->seat_type->name,
+                                    'amount' => $player->blind_amount,
+                                ];
+                            }
+                        }
+                    }
+                    foreach ($payload['extra_bets'] ?? [] as $bet) {
+                        $events[] = [
+                            'eventType' => 'blindPosted',
+                            'name' => $bet['name'],
+                            'blindType' => strtoupper($bet['type']),
+                            'amount' => (int) $bet['amount'],
+                        ];
+                    }
+                    break;
+                case GameEvent::STAGE_START:
                     $stage = StageEnum::fromNameOrFail(strtoupper($event->payload['stage']));
+                    $cards = $payload['cards'] ?? [];
+                    // Business events hold the complete board; Proto expects cards dealt this street.
+                    $cards = match ($stage) {
+                        StageEnum::TURN => array_slice($cards, 3, 1),
+                        StageEnum::RIVER => array_slice($cards, 4, 1),
+                        default => $cards,
+                    };
                     $events[] = [
                         'eventType' => 'stageStarted',
                         'stage' => strtolower($stage->name),
-                        'cards' => implode(',', $event->payload['cards'] ?? []),
+                        'cards' => implode(',', $cards),
                     ];
                     if ($stage->isPreflop()) {
                         $events[] = [
@@ -212,8 +254,8 @@ final class ProtoProvider extends SocketJsonProvider
                         ];
                     }
                     break;
-                case GameEvent::GAME_PLAY_ACTED:
-                    $action = ActionEnum::fromNameOrFail(strtoupper($payload['action']));
+                case GameEvent::PLAYER_ACTED:
+                    $action = ActionEnum::fromNameOrFail(strtoupper(str_replace('-', '_', $payload['action'])));
                     $events[] = [
                         'eventType' => 'playerActed',
                         'name' => $payload['name'],
@@ -221,14 +263,14 @@ final class ProtoProvider extends SocketJsonProvider
                         'amount' => $payload['amount'],
                     ];
                     break;
-                case GameEvent::GAME_KNOWN_PLAY_CARDS:
+                case GameEvent::KNOWN_PLAY_CARDS:
                     $events[] = [
                         'eventType' => 'knownPlayerCards',
                         'name' => $payload['name'],
                         'cards' => implode(',', $payload['cards'] ?? []),
                     ];
                     break;
-                case GameEvent::GAME_OVER:
+                case GameEvent::HAND_OVER:
                     if ($over) {
                         foreach ($game->players as $player) {
                             if (! empty($player->cards)) {
@@ -265,6 +307,7 @@ final class ProtoProvider extends SocketJsonProvider
                 'gameId' => $game->uuid,
                 'pokerNetwork' => $this->options['network'] ?? 'WE',
                 'gameType' => 'NL',
+                'network' => $game->network->name,
                 'bigBlind' => $game->big_blind,
                 'ante' => $game->ante,
                 'currency' => 'USDT',

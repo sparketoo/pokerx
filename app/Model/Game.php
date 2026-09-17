@@ -4,9 +4,8 @@ declare(strict_types=1);
 
 namespace App\Model;
 
-use App\Constants\GameEvent;
-use App\Enum\ActionEnum;
 use App\Enum\GameStatusEnum;
+use App\Enum\NetworkEnum;
 use Carbon\Carbon;
 use Hyperf\Database\Model\Collection;
 use Hyperf\Database\Model\Relations\HasMany;
@@ -20,15 +19,15 @@ use Hyperf\Database\Model\Relations\HasMany;
  * @property string $room_number
  * @property int $hand_number
  * @property string $provider
- * @property string $game_type
- * @property float $big_blind
- * @property float $small_blind
- * @property float $ante
+ * @property NetworkEnum $network
+ * @property int $big_blind
+ * @property int $small_blind
+ * @property int $ante
  * @property GameStatusEnum $status
- * @property float $bet_amount
- * @property ?float $winnings
- * @property ?float $profit
- * @property float $pot
+ * @property int $bet_amount
+ * @property ?int $winnings
+ * @property ?int $profit
+ * @property int $pot
  * @property User $user
  * @property Collection<int, GamePlayer> $players
  * @property Collection<int, Event> $events
@@ -42,14 +41,15 @@ class Game extends Model
      */
     /** @var array<string, string> */
     protected array $casts = [
+        'network' => NetworkEnum::class,
         'status' => GameStatusEnum::class,
-        'big_blind' => 'float',
-        'small_blind' => 'float',
-        'ante' => 'float',
-        'bet_amount' => 'float',
-        'winnings' => 'float',
-        'profit' => 'float',
-        'pot' => 'float',
+        'big_blind' => 'integer',
+        'small_blind' => 'integer',
+        'ante' => 'integer',
+        'bet_amount' => 'integer',
+        'winnings' => 'integer',
+        'profit' => 'integer',
+        'pot' => 'integer',
     ];
 
     /** @return HasMany<GamePlayer, static> */

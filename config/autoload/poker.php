@@ -9,6 +9,7 @@ return [
         'token' => env('PROTO_TOKEN'),
         'network' => env('PROTO_NETWORK', 'WE'),
         'connect_timeout' => 10,
+        'request_timeout' => (float) env('PROTO_REQUEST_TIMEOUT', 20),
         'heartbeat' => 20,
         'pong_timeout' => 10,
         'reconnect_max' => 30,

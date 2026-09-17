@@ -6,6 +6,7 @@ namespace App\Game\Providers;
 
 use App\Model\Game;
 use Psr\Log\LoggerInterface;
+
 use function App\Support\di;
 
 abstract class BaseProvider implements ProviderInterface

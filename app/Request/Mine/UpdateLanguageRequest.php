@@ -13,11 +13,11 @@ class UpdateLanguageRequest extends FormRequest
      */
     public function rules(): array
     {
-        return ['language' => 'required|in:zh-CN,en'];
+        return ['language' => 'required|in:zh-CN,en-US'];
     }
 
     public function language(): string
     {
-        return $this->requiredText('language', '');
+        return $this->validate('language');
     }
 }
