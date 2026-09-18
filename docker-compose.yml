@@ -5,7 +5,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: pokerx-hyperf:local
+    image: pokerx:v1.0.0
     restart: unless-stopped
     environment:
       APP_NAME: ${APP_NAME:-PokerX}
