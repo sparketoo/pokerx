@@ -58,8 +58,8 @@ class StatsController extends ApiController
         /** @var Collection<int, Game> $games */
         $games = Game::query()
             ->where('user_id', $userId)
-            ->where('status', 'CLOSED')
-            ->with(['events' => fn ($query) => $query->where('type', 'hand_over')])
+            ->whereIn('status', ['CLOSED', 'ABORT'])
+            ->with(['events' => fn ($query) => $query->whereIn('type', ['hand_over', 'game_abort'])])
             ->orderBy('id')
             ->get();
 
@@ -75,12 +75,12 @@ class StatsController extends ApiController
             $profit = (float) $game->profit;
             $day = $endedAt->copy()->timezone('Asia/Shanghai')->toDateString();
             $lifetime['hands']++;
-            $lifetime['wins'] += (int) ($profit >= 0);
+            $lifetime['wins'] += (int) ($game->status->isClosed() && $profit >= 0);
             $lifetime['invested'] += $game->bet_amount;
             $lifetime['profit'] += $profit;
             if ($day >= $start && $day <= $end) {
                 $range['hands']++;
-                $range['wins'] += (int) ($profit >= 0);
+                $range['wins'] += (int) ($game->status->isClosed() && $profit >= 0);
                 $range['invested'] += $game->bet_amount;
                 $range['profit'] += $profit;
                 $rows[] = [

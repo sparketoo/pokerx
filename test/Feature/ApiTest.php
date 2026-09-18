@@ -159,6 +159,35 @@ final class ApiTest extends HttpTestCase
         self::assertSame('call', $searched['data']['items'][0]['payload']['action']);
     }
 
+    public function test_game_detail_and_events_keep_their_business_order(): void
+    {
+        $user = TestData::inCoroutine(fn (): User => TestData::user());
+        $token = TestData::inCoroutine(fn (): string => TestData::token($user));
+        $game = TestData::inCoroutine(function () use ($user): Game {
+            $game = TestData::game($user, ['ante' => 10]);
+            $game->players()->createMany([
+                ['seat' => 2, 'name' => 'Big blind', 'is_hero' => false, 'stack' => 1000, 'seat_type' => 'BB', 'blind_amount' => 100, 'bet_amount' => 160, 'cards' => []],
+                ['seat' => 1, 'name' => 'Hero', 'is_hero' => true, 'stack' => 1000, 'seat_type' => 'SB', 'blind_amount' => 50, 'bet_amount' => 230, 'cards' => []],
+            ]);
+            TestData::event($game, GameEvent::HAND_START, ['room_number' => $game->room_number], 1);
+            TestData::event($game, GameEvent::FORCE_BET, ['extra_bets' => [['name' => 'Hero', 'amount' => 20]]], 2);
+            TestData::event($game, GameEvent::PLAYER_ACTED, ['name' => 'Big blind', 'action' => 'bet', 'amount' => 50], 3);
+            TestData::event($game, GameEvent::PLAYER_ACTED, ['name' => 'Hero', 'action' => 'call', 'amount' => 150], 4);
+
+            return $game;
+        });
+        $headers = $this->headersFor($token);
+        $detail = $this->apiRequest(fn () => $this->get('/api/mine/games/detail', ['game_id' => $game->uuid], $headers));
+        $events = $this->apiRequest(fn () => $this->get('/api/mine/games/events', [
+            'game_id' => $game->uuid,
+            'order' => 'asc',
+        ], $headers));
+
+        self::assertSame([1, 2], array_column($detail['data']['game']['players'], 'seat'));
+        self::assertSame([230, 160], array_column($detail['data']['game']['players'], 'bet_amount'));
+        self::assertSame([1, 2, 3, 4], array_column($events['data']['items'], 'seq'));
+    }
+
     public function test_events_endpoint_trims_search_keywords_and_handles_empty_results(): void
     {
         $user = TestData::inCoroutine(fn (): User => TestData::user());

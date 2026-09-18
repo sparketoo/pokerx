@@ -49,7 +49,7 @@ class GamesController extends ApiController
     public function detail(DetailRequest $r): JsonResponse
     {
         $g = Game::query()->where('user_id', $this->user($r)->id)->where('uuid', $r->gameId())->with([
-            'players',
+            'players' => fn ($q) => $q->orderBy('seat'),
         ])->first();
         if (! $g) {
             throw FoundationException::notFound();
@@ -84,11 +84,12 @@ class GamesController extends ApiController
                     GameEvent::HAND_CARD,
                     GameEvent::REQUEST_ACTION,
                     GameEvent::HAND_OVER,
+                    GameEvent::GAME_ABORT,
                 ]);
             });
         }
 
-        $page = $q->orderBy('id', $r->order())
+        $page = $q->orderBy('seq', $r->order())
             ->cursorPaginate($r->limit(), ['*'], 'cursor', $r->cursor());
 
         return $this->success([

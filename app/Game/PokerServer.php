@@ -209,6 +209,9 @@ final class PokerServer implements OnCloseInterface, OnMessageInterface, OnOpenI
             NetworkEnum::fromNameOrFail($startPayload['network']),
         );
 
+        if ($game->status->isAbort()) {
+            $this->providerFor($game)->abort($game);
+        }
         if ($game->status->isClosed()) {
             $this->providerFor($game)->over($game);
         }
@@ -277,6 +280,18 @@ final class PokerServer implements OnCloseInterface, OnMessageInterface, OnOpenI
                     ], $message->id);
                 }
             });
+
+        return $game;
+    }
+
+    public function handleGameAbort(PokerServerMessageVo $message): Game
+    {
+        $this->validatePayload($message->payload, $this->handUuidRules());
+        if (array_keys($message->payload) !== ['hand_uuid']) {
+            throw GatewayException::eventInvalid();
+        }
+        $game = $this->append($message);
+        $this->providerFor($game)->abort($game);
 
         return $game;
     }
@@ -492,14 +507,18 @@ final class PokerServer implements OnCloseInterface, OnMessageInterface, OnOpenI
                     'cards.*' => ['required', 'string', 'max:3'],
                 ],
                 GameEvent::HAND_OVER => $this->handOverRules(),
+                GameEvent::GAME_ABORT => [],
                 default => throw GatewayException::eventInvalid(),
             };
+            if ($event['type'] === GameEvent::GAME_ABORT && $event['payload'] !== []) {
+                throw GatewayException::eventInvalid();
+            }
             $fullEvents[] = [
                 'type' => $event['type'],
                 'payload' => $this->validatorFactory->make($event['payload'], $rules)->validate(),
                 ...(isset($event['id']) ? ['id' => $event['id']] : []),
             ];
-            $overSeen = $event['type'] === GameEvent::HAND_OVER;
+            $overSeen = in_array($event['type'], [GameEvent::HAND_OVER, GameEvent::GAME_ABORT], true);
         }
 
         $initial = $fullEvents[0] ?? null;

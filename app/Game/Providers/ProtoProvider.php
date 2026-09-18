@@ -7,6 +7,7 @@ namespace App\Game\Providers;
 use App\Constants\GameEvent;
 use App\Enum\ActionEnum;
 use App\Enum\StageEnum;
+use App\Exception\GatewayException;
 use App\Exception\PokerException;
 use App\Model\Game;
 use App\Model\GamePlayer;
@@ -225,9 +226,17 @@ final class ProtoProvider extends SocketJsonProvider
         return $this->authenticated;
     }
 
+    public function abort(Game $game): void
+    {
+        $this->callRequestActionCallback($game->uuid, RequestActionResultVo::failure(PokerException::solveStale()));
+    }
+
     /** The callback reports failures only: Proto never acknowledges successful fullGameLog. */
     public function over(Game $game, ?\Closure $onError = null): void
     {
+        if ($game->status->isAbort()) {
+            throw GatewayException::eventInvalid();
+        }
         // Errors carry only gameId; retire any solve before the settlement phase.
         $this->callRequestActionCallback($game->uuid, RequestActionResultVo::failure(PokerException::solveStale()));
         if (! $this->awaitAuthenticated((float) ($this->options['connect_timeout'] ?? 10))) {
@@ -282,6 +291,9 @@ final class ProtoProvider extends SocketJsonProvider
     /** @return array<string, mixed> */
     public function gameEvents(Game $game, bool $over = false): array
     {
+        if ($over && $game->status->isAbort()) {
+            throw GatewayException::eventInvalid();
+        }
         $events = [];
         foreach ($game->players as $player) {
             $events[] = [

@@ -110,6 +110,8 @@ it('dispatches hand_start, persists it and acknowledges the client', function ()
                 $this->calls[] = 'request';
             }
 
+            public function abort(Game $game): void {}
+
             public function over(Game $game, ?Closure $onError = null): void
             {
                 $this->calls[] = 'over';
@@ -255,6 +257,8 @@ it('returns the provider action in the request_action acknowledgement', function
                 $callback(RequestActionResultVo::success(ActionEnum::ALL_IN, 900));
             }
 
+            public function abort(Game $game): void {}
+
             public function over(Game $game, ?Closure $onError = null): void
             {
                 $this->calls[] = 'over';
@@ -328,7 +332,7 @@ it('returns the provider action in the request_action acknowledgement', function
             ->and($game->events()->count())->toBe(6);
         $settlementError = $provider->settlementError;
         if ($settlementError === null) {
-            throw new \LogicException('Settlement error callback was not registered.');
+            throw new LogicException('Settlement error callback was not registered.');
         }
         $settlementError('upstream settlement rejected');
         expect($sender->messages)->toHaveCount(7)
@@ -354,6 +358,8 @@ it('upserts a hand refresh and returns the stable hand UUID in its acknowledgeme
             public array $calls = [];
 
             public function requestAction(Game $game, Closure $callback): void {}
+
+            public function abort(Game $game): void {}
 
             public function over(Game $game, ?Closure $onError = null): void
             {

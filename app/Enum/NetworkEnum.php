@@ -12,6 +12,7 @@ enum NetworkEnum
 
     case OK;
     case WE;
+    case WPK;
 
     public function isOk(): bool
     {

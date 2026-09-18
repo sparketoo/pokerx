@@ -61,6 +61,7 @@ final class GameService
                     'stack' => $player['stack'],
                     'seat_type' => $seatType,
                     'blind_amount' => 0,
+                    'bet_amount' => 0,
                     'cards' => [],
                 ];
             });
@@ -104,7 +105,7 @@ final class GameService
 
     /**
      * Persist an accepted follow-up event and derive the game lifecycle state.
-     * Idempotent replay is deliberately not handled here yet.
+     * Only game_abort supports replay with the same event ID and payload.
      *
      * @param  array<string, mixed>  $payload
      */
@@ -117,6 +118,19 @@ final class GameService
                 ->where('user_id', $user->id)
                 ->lockForUpdate()
                 ->firstOrFail();
+            if ($type === GameEvent::GAME_ABORT) {
+                if (array_keys($payload) !== ['hand_uuid'] || $payload['hand_uuid'] !== $handUuid) {
+                    throw GatewayException::eventInvalid();
+                }
+                $previous = $game->events()->where('uuid', $eventUuid)->first();
+                if ($previous !== null) {
+                    if (! $game->status->isAbort() || $previous->type !== $type || $previous->payload !== $payload) {
+                        throw GatewayException::eventInvalid();
+                    }
+
+                    return $game->load(['players', 'events']);
+                }
+            }
             $seq = (int) Event::query()->where('game_id', $game->id)->max('seq') + 1;
             $this->assertEventSequence($game, $type, $seq, $payload);
             $game->events()->create([
@@ -135,12 +149,21 @@ final class GameService
             if ($type === GameEvent::PLAYER_ACTED) {
                 $amount = $this->actedAmount($payload);
                 $game->pot = $game->pot + $amount;
+                if (is_string($payload['name'] ?? null)) {
+                    $game->players()->where('name', $payload['name'])->increment('bet_amount', $amount);
+                }
 
                 /** @var string $heroName */
                 $heroName = $this->heroName($game);
                 if (($payload['name'] ?? null) === $heroName) {
                     $game->bet_amount = $game->bet_amount + $amount;
                 }
+                $game->saveOrFail();
+            }
+            if ($type === GameEvent::GAME_ABORT) {
+                $game->winnings = 0;
+                $game->profit = -$game->bet_amount;
+                $game->status = GameStatusEnum::ABORT;
                 $game->saveOrFail();
             }
             if ($type === GameEvent::HAND_OVER && $game->status->isOpen()) {
@@ -199,7 +222,7 @@ final class GameService
             $bigBlind = (int) $forceBet['big_blind'];
             $smallBlind = (int) $forceBet['small_blind'];
             $ante = (int) ($forceBet['ante'] ?? 0);
-            $preparedPlayers = $this->preparePlayers($players, $smallBlind, $bigBlind);
+            $preparedPlayers = $this->preparePlayers($players, $smallBlind, $bigBlind, $ante);
             $hero = $preparedPlayers->firstWhere('is_hero', true);
             if (empty($hero)) {
                 throw GameException::heroNotFound();
@@ -222,6 +245,10 @@ final class GameService
                 ->lockForUpdate()
                 ->first();
 
+            if ($game !== null && ($game->status->isAbort()
+                || (! $game->status->isOpen() && collect($events)->contains('type', GameEvent::GAME_ABORT)))) {
+                throw GatewayException::eventInvalid();
+            }
             if ($game === null) {
                 $uuid = Str::uuid()->toString();
                 if (! $user->is_vip) {
@@ -246,7 +273,11 @@ final class GameService
             $winnings = 0;
             $status = GameStatusEnum::OPEN;
 
+            $heroFolded = false;
             foreach ($events as $event) {
+                if (! $status->isOpen()) {
+                    throw GatewayException::eventInvalid();
+                }
                 $payload = $event['payload'];
                 if ($event['type'] === GameEvent::FORCE_BET) {
                     foreach ($event['payload']['extra_bets'] ?? [] as $bet) {
@@ -254,6 +285,11 @@ final class GameService
                             throw GatewayException::eventInvalid();
                         }
                         $pot = $pot + (int) $bet['amount'];
+                        $preparedPlayers = $this->addPreparedPlayerBet(
+                            $preparedPlayers,
+                            (string) $bet['name'],
+                            (int) $bet['amount'],
+                        );
                         if ($bet['name'] === $heroName) {
                             $betAmount = $betAmount + (int) $bet['amount'];
                         }
@@ -262,9 +298,23 @@ final class GameService
                 if ($event['type'] === GameEvent::PLAYER_ACTED) {
                     $amount = $this->actedAmount($payload);
                     $pot = $pot + $amount;
+                    if (is_string($payload['name'] ?? null)) {
+                        $preparedPlayers = $this->addPreparedPlayerBet(
+                            $preparedPlayers,
+                            $payload['name'],
+                            $amount,
+                        );
+                    }
                     if (($payload['name'] ?? null) === $heroName) {
+                        $heroFolded = $heroFolded || (($payload['action'] ?? null) === 'fold' && $amount === 0);
                         $betAmount = $betAmount + $amount;
                     }
+                }
+                if ($event['type'] === GameEvent::GAME_ABORT) {
+                    if (! $heroFolded || array_diff(array_keys($payload), ['hand_uuid']) !== []) {
+                        throw GatewayException::eventInvalid();
+                    }
+                    $status = GameStatusEnum::ABORT;
                 }
                 if ($event['type'] === GameEvent::HAND_OVER) {
                     $winnings = $this->winningsForName($heroName, array_map(static fn (array $player): string => $player['name'], $players), $payload);
@@ -284,7 +334,7 @@ final class GameService
                 'status' => $status,
                 'bet_amount' => $betAmount,
                 'winnings' => $winnings,
-                'profit' => $status->isClosed() ? $winnings - $betAmount : null,
+                'profit' => ! $status->isOpen() ? $winnings - $betAmount : null,
                 'pot' => $pot,
             ]);
             $game->saveOrFail();
@@ -364,9 +414,9 @@ final class GameService
      * @param  list<array{seat: int, name: string, hero: bool, stack: int, seat_type: string}>  $players
      * @return Collection<int, array<string, mixed>>
      */
-    private function preparePlayers(array $players, int $smallBlind, int $bigBlind): Collection
+    private function preparePlayers(array $players, int $smallBlind, int $bigBlind, int $ante): Collection
     {
-        return collect($players)->map(function (array $player) use ($smallBlind, $bigBlind) {
+        return collect($players)->map(function (array $player) use ($smallBlind, $bigBlind, $ante) {
             $seatType = SeatTypeEnum::fromNameOrFail($player['seat_type']);
             $blindAmount = match ($seatType) {
                 SeatTypeEnum::BB => $bigBlind,
@@ -381,8 +431,24 @@ final class GameService
                 'stack' => $player['stack'],
                 'seat_type' => $seatType,
                 'blind_amount' => $blindAmount,
+                'bet_amount' => $ante + $blindAmount,
                 'cards' => [],
             ];
+        });
+    }
+
+    /**
+     * @param  Collection<int, array<string, mixed>>  $players
+     * @return Collection<int, array<string, mixed>>
+     */
+    private function addPreparedPlayerBet(Collection $players, string $name, int $amount): Collection
+    {
+        return $players->map(function (array $player) use ($name, $amount): array {
+            if ($player['name'] === $name) {
+                $player['bet_amount'] = (int) $player['bet_amount'] + $amount;
+            }
+
+            return $player;
         });
     }
 
@@ -395,6 +461,9 @@ final class GameService
             $ante = (int) ($payload['ante'] ?? 0);
             $game->players()->where('seat_type', SeatTypeEnum::SB->name)->update(['blind_amount' => $smallBlind]);
             $game->players()->where('seat_type', SeatTypeEnum::BB->name)->update(['blind_amount' => $bigBlind]);
+            $game->players()->increment('bet_amount', $ante);
+            $game->players()->where('seat_type', SeatTypeEnum::SB->name)->increment('bet_amount', $smallBlind);
+            $game->players()->where('seat_type', SeatTypeEnum::BB->name)->increment('bet_amount', $bigBlind);
             $hero = $game->players()->where('is_hero', true)->firstOrFail();
             $heroBlind = match ($hero->seat_type) {
                 SeatTypeEnum::BB => $bigBlind,
@@ -414,6 +483,7 @@ final class GameService
             }
             $amount = (int) $bet['amount'];
             $game->pot = $game->pot + $amount;
+            $game->players()->where('name', $bet['name'])->increment('bet_amount', $amount);
             if ($bet['name'] === $heroName) {
                 $game->bet_amount = $game->bet_amount + $amount;
             }
@@ -435,6 +505,10 @@ final class GameService
         $events = $game->events()->orderBy('seq')->get();
         $dealt = $events->contains('type', GameEvent::HAND_CARD);
         $valid = match ($type) {
+            GameEvent::GAME_ABORT => $dealt && $events->contains(fn (Event $event): bool => $event->type === GameEvent::PLAYER_ACTED
+                && ($event->payload['name'] ?? null) === $this->heroName($game)
+                && ($event->payload['action'] ?? null) === 'fold'
+                && ($event->payload['amount'] ?? null) === 0),
             GameEvent::FORCE_BET => $seq === 2
                 ? isset($payload['small_blind'], $payload['big_blind'])
                 : $seq > 2 && ! empty($payload['extra_bets'])

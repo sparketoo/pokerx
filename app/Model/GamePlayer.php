@@ -19,6 +19,7 @@ use Hyperf\Database\Model\Relations\BelongsTo;
  * @property int $stack 初始筹码
  * @property SeatTypeEnum $seat_type 座位类型
  * @property ?int $blind_amount 盲注
+ * @property int $bet_amount 累计投注
  * @property list<string>|null $cards 已知手牌
  */
 class GamePlayer extends Model
@@ -33,6 +34,7 @@ class GamePlayer extends Model
         'is_hero' => 'boolean',
         'stack' => 'integer',
         'blind_amount' => 'integer',
+        'bet_amount' => 'integer',
     ];
 
     /** @return BelongsTo<Game, static> */

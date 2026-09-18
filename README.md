@@ -257,7 +257,7 @@ game_id 必填。响应：
       "pending":false
     }
 
-该接口直接查询数据库；live 固定为 null、pending 固定为 false。找不到当前用户牌局时返回 not_found。
+该接口直接查询数据库；players 按 seat 升序返回，其中 bet_amount 为已持久化的该玩家累计投注。live 固定为 null、pending 固定为 false。找不到当前用户牌局时返回 not_found。
 
 #### GET /api/mine/games/events?game_id=<UUID>
 
@@ -282,6 +282,8 @@ game_id 必填。额外参数：
       ],
       "next_cursor":null
     }
+
+事件按照同一牌局内的 seq 排序；seq 是牌局事件的权威业务顺序，不依赖数据库 ID 或写入时间。
 
 #### GET /api/mine/events
 
@@ -323,7 +325,7 @@ game_id 必填。额外参数：
       "as_of":"2026-09-12T12:00:00+00:00"
     }
 
-每次请求直接计算数据库中的 status=CLOSED 牌局，不使用缓存。
+每次请求直接计算数据库中的 status=CLOSED 或 ABORT 牌局，不使用缓存。ABORT 计入手数、投入及收益，但不计为胜局；零投入弃牌收益为 0，也不匹配胜负列表筛选。
 
 #### GET /api/mine/stats/trend
 
@@ -414,7 +416,7 @@ game_id 必填。额外参数：
       "payload":{"hand_uuid":"c69424e0-71bd-4711-8bb3-31b2ad650d55"}
     }
 
-reply_to 对应客户端 id。成功接收游戏事件的回执名为事件名加 .ack；错误事件 type 为 error。当前版本未实现事件重传幂等，客户端不应重复发送已成功接收的事件。
+reply_to 对应客户端 id。成功接收游戏事件的回执名为事件名加 .ack；错误事件 type 为 error。仅 game_abort 支持相同事件 ID 与载荷的重传幂等；其他事件不应重复发送已成功接收的事件。
 
 ### 心跳
 
@@ -451,6 +453,7 @@ PokerServer 仅接受 JSON 整数，拒绝小数、数字字符串、负数及�
     known_play_cards
     request_action
     hand_over
+    game_abort
 
 推荐顺序：
 
@@ -468,7 +471,7 @@ hand_start 回执的 payload.hand_uuid 是服务端牌局标识。之后所有�
 `hand_uuid`。`payload` 采用 `hand_start` 的全部开局字段，并额外携带按发生顺序排列的
 `events`；其中每项由 `type` 和 `payload` 组成。`events` 必须先包含初始化 `force_bet`，随后可追加仅含 `extra_bets` 的 `force_bet`，
 再包含唯一的 `hand_card`，之后才允许 `stage_start`、`player_acted`、`known_play_cards` 和 `hand_over`。
-`hand_over` 只能出现一次且必须在最后。
+`hand_over` 或 `game_abort` 只能出现一次且必须在最后。快照中的 game_abort.payload 为 {}，必须在 Hero 的零金额 fold 之后；已 ABORT 的牌局不可通过快照重开。
 
     {
       "id":"c753a3ce-26de-47e2-b249-b7db5654b944",
@@ -529,7 +532,7 @@ hand_start 回执的 payload.hand_uuid 是服务端牌局标识。之后所有�
 | --- | --- | --- | --- |
 | room_number | string | 是 | 最长 64 字符 |
 | hand_number | integer | 是 | 最小 1 |
-| network | enum | 是 | 前端上报游戏平台；`OK`、`WE` |
+| network | enum | 是 | 前端上报游戏平台；`OK`、`WE`、`WPK` |
 | players | array | 是 | 至少一名玩家 |
 | players[].seat | integer | 是 | 最小 1，数组内唯一 |
 | players[].name | string | 是 | 最长 64，数组内唯一 |
@@ -696,6 +699,23 @@ winners 只表示主池获奖者及各自实际分配的金额，不包括边池
 成功后状态从 OPEN 变为 CLOSED（不会进入 SETTLED）；winnings 为 winners 中 Hero 的金额，没有 Hero 则为 0；profit = winnings - bet_amount。这里仍是主池结算口径，不能代表包含边池收益的完整盈亏。回执为 hand_over.ack，确认的是本地保存；第三方异步拒绝继续通过 hand_over.error 反馈，不代表第三方已确认入账。
 
 ProtoProvider 在一次 fullGameLog 中为每位赢家生成一条 playerWon，随后仅生成一条 gameOver；实际 handShown 在这些获奖事件之前。实时上报与 hand_refresh 使用相同结算校验。
+
+#### game_abort
+
+Hero 的原生 fold 经 player_acted 成功保存后，发送 `game_abort`，载荷只允许
+`{"hand_uuid":"…"}`，不接受 reason 或 winners。服务端锁定牌局并确认属于当前用户、
+状态为 OPEN、已发手牌且存在 Hero 的零金额 fold，然后原子写入结束事件与 ABORT 状态。
+回执为 `game_abort.ack`，payload.hand_uuid 与请求相同。winnings=0，profit=-bet_amount，
+投入包含已保存的前注、盲注、补盲、straddle 和自主下注。
+
+同一事件 ID 和相同载荷重试返回原 hand_uuid，不重复写入或统计；不同事件 ID 的重复终止、
+终止后行动/求解/hand_over 均拒绝。ABORT 只终止本人的跟踪记录，不表示整桌实际结算，
+不会向第三方发送 fullGameLog/gameOver，并清理该局的待处理求解。
+
+WPK 的 room_number 使用精确保留的原生逐手 gameid 字符串，hand_number 固定为 1；
+物理 roomid 仅在客户端内部使用。现有自然键及唯一索引不变。
+已有数据库上线前必须执行 `2026_09_18_000008_add_wpk_and_abort_enums.php`，
+该迁移仅添加 WPK 网络与 ABORT 状态的枚举值，不修改牌局身份或唯一约束。
 
 ### Provider 连接模型
 

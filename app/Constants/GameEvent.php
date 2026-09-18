@@ -33,4 +33,6 @@ class GameEvent extends AbstractConstants
     public const string REQUEST_ACTION = 'request_action';
 
     public const string HAND_OVER = 'hand_over';
+
+    public const string GAME_ABORT = 'game_abort';
 }

@@ -11,9 +11,15 @@ enum GameStatusEnum
     use EnumHelper;
 
     case OPEN;
+    case ABORT;
     case CLOSED;
     case SETTLED;
     case INCOMPLETE;
+
+    public function isAbort(): bool
+    {
+        return $this->is(self::ABORT);
+    }
 
     public function isOpen(): bool
     {

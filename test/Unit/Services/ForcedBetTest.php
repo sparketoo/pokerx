@@ -39,13 +39,18 @@ it('records posted blinds and incremental straddles without replaying base blind
             'small_blind' => 50, 'big_blind' => 100, 'ante' => 5,
             'extra_bets' => [['name' => 'Hero', 'type' => 'post', 'amount' => 100]],
         ]);
-        expect($initial->pot)->toBe(265)->and($initial->bet_amount)->toBe(105);
+        expect($initial->pot)->toBe(265)
+            ->and($initial->bet_amount)->toBe(105)
+            ->and($initial->players->sortBy('seat')->pluck('bet_amount')->all())->toBe([55, 105, 105]);
         $service->append($user, $game->uuid, (string) Str::uuid(), GameEvent::HAND_CARD, ['cards' => ['As', 'Qd']]);
         $service->append($user, $game->uuid, (string) Str::uuid(), GameEvent::STAGE_START, ['stage' => 'preflop', 'cards' => []]);
         $game = $service->append($user, $game->uuid, (string) Str::uuid(), GameEvent::FORCE_BET, [
             'extra_bets' => [['name' => 'Hero', 'type' => 'straddle', 'amount' => 200]],
         ]);
-        expect($game->pot)->toBe(465)->and($game->bet_amount)->toBe(305)->and($game->big_blind)->toBe(100);
+        expect($game->pot)->toBe(465)
+            ->and($game->bet_amount)->toBe(305)
+            ->and($game->big_blind)->toBe(100)
+            ->and($game->players->sortBy('seat')->pluck('bet_amount')->all())->toBe([55, 105, 305]);
         $report = (new ProtoProvider)->gameEvents($game);
         expect($report['game'])->toMatchArray(['gameType' => 'NL', 'network' => 'OK']);
         $allIn = $service->append($user, $game->uuid, (string) Str::uuid(), GameEvent::PLAYER_ACTED, [
@@ -120,7 +125,10 @@ it('replays posted blinds and pre-card straddles with the same totals', function
             ['type' => GameEvent::STAGE_START, 'payload' => ['stage' => 'preflop', 'cards' => []]],
         ];
         $game = $service->upsertHandRefresh($user, 'forced-refresh', 1, $players, (string) Str::uuid(), [], $events, NetworkEnum::OK);
-        expect($game->pot)->toBe(460)->and($game->bet_amount)->toBe(355)->and($game->hero()->cards)->toBe(['As', 'Qd']);
+        expect($game->pot)->toBe(460)
+            ->and($game->bet_amount)->toBe(355)
+            ->and($game->hero()->cards)->toBe(['As', 'Qd'])
+            ->and($game->players->sortBy('seat')->pluck('bet_amount')->all())->toBe([355, 105]);
         $again = $service->upsertHandRefresh($user, 'forced-refresh', 1, $players, (string) Str::uuid(), [], $events, NetworkEnum::OK);
         expect($again->pot)->toBe(460)->and($again->bet_amount)->toBe(355)->and($again->uuid)->toBe($game->uuid);
     });

@@ -38,6 +38,11 @@ final class MockProvider extends BaseProvider
         });
     }
 
+    public function abort(Game $game): void
+    {
+        $this->stage($game);
+    }
+
     public function stage(Game $game): void
     {
         $timer = $this->timers[$game->uuid] ?? null;
