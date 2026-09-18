@@ -6,49 +6,50 @@
 # @license  https://github.com/hyperf/hyperf/blob/master/LICENSE
 
 FROM hyperf/hyperf:8.4-alpine-v3.22-swoole
-LABEL maintainer="Hyperf Developers <group@hyperf.io>" version="1.0" license="MIT" app.name="Hyperf"
 
-##
-# ---------- env settings ----------
-##
-# --build-arg timezone=Asia/Shanghai
-ARG timezone
+LABEL org.opencontainers.image.title="PokerX Hyperf" \
+      org.opencontainers.image.description="PokerX HTTP and WebSocket backend"
 
-ENV TIMEZONE=${timezone:-"Asia/Shanghai"} \
+ARG TIMEZONE=Asia/Shanghai
+
+ENV TIMEZONE=${TIMEZONE} \
     APP_ENV=prod \
-    SCAN_CACHEABLE=(true)
-
-# update
-RUN set -ex \
-    # show php version and extensions
-    && php -v \
-    && php -m \
-    && php --ri swoole \
-    #  ---------- some config ----------
-    && cd /etc/php* \
-    # - config PHP
-    && { \
-        echo "upload_max_filesize=128M"; \
-        echo "post_max_size=128M"; \
-        echo "memory_limit=1G"; \
-        echo "date.timezone=${TIMEZONE}"; \
-    } | tee conf.d/99_overrides.ini \
-    # - config timezone
-    && ln -sf /usr/share/zoneinfo/${TIMEZONE} /etc/localtime \
-    && echo "${TIMEZONE}" > /etc/timezone \
-    # ---------- clear works ----------
-    && rm -rf /var/cache/apk/* /tmp/* /usr/share/man \
-    && echo -e "\033[42;37m Build Completed :).\033[0m\n"
+    SCAN_CACHEABLE=true \
+    COMPOSER_ALLOW_SUPERUSER=1
 
 WORKDIR /opt/www
 
-# Composer Cache
-# COPY ./composer.* /opt/www/
-# RUN composer install --no-dev --no-scripts
+# The official Hyperf image already includes Swoole, Redis and pdo_mysql.
+RUN set -eux; \
+    apk add --no-cache tzdata; \
+    ln -snf "/usr/share/zoneinfo/${TIMEZONE}" /etc/localtime; \
+    echo "${TIMEZONE}" > /etc/timezone; \
+    php_ini_scan_dir="$(php --ini | awk -F ': ' '/Scan for additional .ini files in:/{print $2}')"; \
+    test -d "${php_ini_scan_dir}"; \
+    { \
+        echo 'upload_max_filesize=128M'; \
+        echo 'post_max_size=128M'; \
+        echo 'memory_limit=1G'; \
+        echo "date.timezone=${TIMEZONE}"; \
+    } > "${php_ini_scan_dir}/99-pokerx.ini"; \
+    php -m | grep -qx 'pdo_mysql'; \
+    php -m | grep -qx 'redis'; \
+    php --ri swoole >/dev/null
 
-COPY . /opt/www
-RUN composer install --no-dev -o && php bin/hyperf.php
+COPY composer.json composer.lock ./
+RUN composer install \
+        --no-dev \
+        --no-interaction \
+        --no-progress \
+        --prefer-dist \
+        --optimize-autoloader \
+        --no-scripts
 
-EXPOSE 9501
+COPY . .
+RUN set -eux; \
+    mkdir -p runtime; \
+    chmod +x docker/entrypoint.sh
 
-ENTRYPOINT ["php", "/opt/www/bin/hyperf.php", "start"]
+EXPOSE 18080 18081
+
+ENTRYPOINT ["/opt/www/docker/entrypoint.sh"]

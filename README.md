@@ -8,7 +8,38 @@
 | WebSocket | ws://127.0.0.1:18081/ |
 | 健康检查 | GET /api/health |
 
-## 启动
+## Docker 一键启动（推荐）
+
+Docker Compose 会同时运行 PHP 8.4 + Swoole 的 Hyperf 应用、MySQL 8.4 和 Redis 7，并在 MySQL 健康后自动执行迁移。HTTP 与 WebSocket 由同一个 Hyperf 进程提供，无需额外的 Nginx 或 WebSocket 容器。
+
+    cp .env.docker.example .env.docker
+    docker compose --env-file .env.docker up -d --build
+
+服务地址：
+
+| 服务 | 地址 |
+| --- | --- |
+| HTTP API | http://127.0.0.1:18080 |
+| WebSocket | ws://127.0.0.1:18081/ |
+| MySQL | 127.0.0.1:3306 |
+| Redis | 127.0.0.1:6379 |
+
+确认启动完成：
+
+    docker compose --env-file .env.docker ps
+    curl http://127.0.0.1:18080/api/health
+
+查看应用日志、执行命令与停止服务：
+
+    docker compose --env-file .env.docker logs -f app
+    docker compose --env-file .env.docker exec app php bin/hyperf.php list
+    docker compose --env-file .env.docker down
+
+MySQL 与 Redis 数据分别存放在 `mysql_data`、`redis_data` Docker 卷中；普通 `docker compose down` 不会删除它们。需要重新创建本地数据时，执行 `docker compose --env-file .env.docker down -v`。
+
+首次启动使用内置的 `mock` 牌局提供方，保证整套服务可独立运行。接入真实牌局服务时，在 `.env.docker` 中设置 `POKER_PROVIDER=proto`、`PROTO_URL` 与 `PROTO_TOKEN`。生产环境必须替换示例 `APP_KEY`，并使用强密码替换 `MYSQL_PASSWORD` 和 `MYSQL_ROOT_PASSWORD`；`APP_KEY` 一旦开始使用便不可随意更换。
+
+## 本机启动
 
     composer install
     cp .env.example .env
