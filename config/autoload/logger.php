@@ -16,6 +16,8 @@ use Monolog\Formatter\LineFormatter;
 use Monolog\Handler\StreamHandler;
 use Monolog\Level;
 
+use function Hyperf\Support\env;
+
 return [
     'default' => 'default',
     'channels' => [
@@ -23,7 +25,7 @@ return [
             'handler' => [
                 'class' => StreamHandler::class,
                 'constructor' => [
-                    'stream' => dirname(__DIR__, 2).'/runtime/logs/hyperf.log',
+                    'stream' => env('LOG_OUTPUT', dirname(__DIR__, 2).'/runtime/logs/hyperf.log'),
                     'level' => Level::Debug,
                 ],
             ],

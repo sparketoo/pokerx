@@ -179,7 +179,7 @@ it('logs each upstream frame once including authentication without retaining sec
             }
         };
         if (! $container instanceof ContainerInterface) {
-            throw new \LogicException('The application container must support test bindings.');
+            throw new LogicException('The application container must support test bindings.');
         }
         $container->set(LoggerInterface::class, $logger);
         $provider = connectedSettlementProvider();

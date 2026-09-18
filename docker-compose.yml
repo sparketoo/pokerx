@@ -12,6 +12,7 @@ services:
       APP_ENV: ${APP_ENV:-dev}
       APP_KEY: ${APP_KEY:-base64:4RXwsfBQ2jOlWtobzSStUS1pLQ1b0C51IQHG/rCcRXc=}
       SCAN_CACHEABLE: ${SCAN_CACHEABLE:-false}
+      LOG_OUTPUT: ${LOG_OUTPUT:-php://stdout}
       HTTP_HOST: 0.0.0.0
       HTTP_PORT: 18080
       POKER_WS_HOST: 0.0.0.0

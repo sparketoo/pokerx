@@ -29,7 +29,9 @@ final class InMemoryGameDatabase
         $connection = new Connection($pdo);
         $connection->setQueryGrammar(new class extends Grammar
         {
-            /** @param array<string, mixed> $values */
+            /**
+             * @param  array<string, mixed>  $values
+             */
             protected function compileUpdateColumns(Builder $query, array $values): string
             {
                 return parent::compileUpdateColumns($query, array_combine(
