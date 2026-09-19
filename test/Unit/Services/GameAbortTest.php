@@ -15,6 +15,8 @@ use App\Model\User;
 use App\Model\UserToken;
 use App\Service\CreditService;
 use App\Service\GameService;
+use App\Service\InsuranceService;
+use App\Service\UserGameConfigService;
 use App\Service\UserTokenService;
 use App\Vo\Game\PokerServerConnectionVo;
 use App\Vo\Game\PokerServerMessageVo;
@@ -167,7 +169,7 @@ it('dispatches abort ACK after persistence without ordinary settlement and rejec
             return true;
         }
     };
-    $server = new PokerServer($sender, $manager, new UserTokenService, $fixture->service, \App\Support\di(ValidatorFactoryInterface::class), new NullLogger);
+    $server = new PokerServer($sender, $manager, new UserTokenService, $fixture->service, \App\Support\di(ValidatorFactoryInterface::class), new NullLogger, new InsuranceService(\App\Support\di(ValidatorFactoryInterface::class), new UserGameConfigService));
     (new ReflectionProperty($server, 'connections'))->setValue($server, [1 => new PokerServerConnectionVo(1, $fixture->user, new UserToken)]);
     $id = (string) Str::uuid();
     $frame = new Frame;

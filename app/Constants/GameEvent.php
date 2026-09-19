@@ -32,6 +32,10 @@ class GameEvent extends AbstractConstants
 
     public const string REQUEST_ACTION = 'request_action';
 
+    public const string REQUEST_INSURANCE = 'request_insurance';
+
+    public const string INSURANCE_SUBMITTED = 'insurance_submitted';
+
     public const string HAND_OVER = 'hand_over';
 
     public const string GAME_ABORT = 'game_abort';

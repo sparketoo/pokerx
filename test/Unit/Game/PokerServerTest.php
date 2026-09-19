@@ -12,18 +12,27 @@ use App\Game\PokerServer;
 use App\Game\Providers\BaseProvider;
 use App\Game\Providers\ProviderInterface;
 use App\Model\Game;
+use App\Model\User;
+use App\Model\UserInsurance;
 use App\Model\UserToken;
 use App\Service\CreditService;
 use App\Service\GameService;
+use App\Service\InsuranceService;
+use App\Service\UserGameConfigService;
 use App\Service\UserTokenService;
+use App\Vo\Game\PokerServerConnectionVo;
 use App\Vo\Game\PokerServerMessageVo;
 use App\Vo\Game\RequestActionResultVo;
+use Hyperf\Context\ApplicationContext;
+use Hyperf\Database\ConnectionResolverInterface;
+use Hyperf\Di\Container;
 use Hyperf\Stringable\Str;
 use Hyperf\Validation\Contract\ValidatorFactoryInterface;
 use Hyperf\WebSocketServer\Sender;
 use Psr\Log\NullLogger;
 use Swoole\Http\Request;
 use Swoole\WebSocket\Frame;
+use Tests\Support\InMemoryGameDatabase;
 use Tests\Support\TestData;
 
 use function App\Support\di;
@@ -127,6 +136,7 @@ it('dispatches hand_start, persists it and acknowledges the client', function ()
             new GameService(new CreditService, $manager),
             di(ValidatorFactoryInterface::class),
             new NullLogger,
+            new InsuranceService(di(ValidatorFactoryInterface::class), new UserGameConfigService),
         );
         $user = TestData::user();
         $token = TestData::token($user);
@@ -268,7 +278,7 @@ it('returns the provider action in the request_action acknowledgement', function
         $manager = new PokerManager;
         $manager->extend($manager->getDefaultProvider(), fn (): ProviderInterface => $provider);
         $sender = new SenderSpy;
-        $server = new PokerServer($sender, $manager, new UserTokenService, new GameService(new CreditService, $manager), di(ValidatorFactoryInterface::class), new NullLogger);
+        $server = new PokerServer($sender, $manager, new UserTokenService, new GameService(new CreditService, $manager), di(ValidatorFactoryInterface::class), new NullLogger, new InsuranceService(di(ValidatorFactoryInterface::class), new UserGameConfigService));
         $user = TestData::user();
         $token = TestData::token($user);
         $swoole = Mockery::mock();
@@ -376,6 +386,7 @@ it('upserts a hand refresh and returns the stable hand UUID in its acknowledgeme
             new GameService(new CreditService, $manager),
             di(ValidatorFactoryInterface::class),
             new NullLogger,
+            new InsuranceService(di(ValidatorFactoryInterface::class), new UserGameConfigService),
         );
         $user = TestData::user();
         $token = TestData::token($user);
@@ -438,7 +449,7 @@ it('correlates provider failures and preserves their error codes', function (): 
         $manager->extend($manager->getDefaultProvider(), fn (): ProviderInterface => $provider);
         $service = new GameService(new CreditService, $manager);
         $sender = new SenderSpy;
-        $server = new PokerServer($sender, $manager, new UserTokenService, $service, di(ValidatorFactoryInterface::class), new NullLogger);
+        $server = new PokerServer($sender, $manager, new UserTokenService, $service, di(ValidatorFactoryInterface::class), new NullLogger, new InsuranceService(di(ValidatorFactoryInterface::class), new UserGameConfigService));
         $user = TestData::user();
         TestData::token($user);
         $token = UserToken::query()->where('user_id', $user->id)->firstOrFail();
@@ -454,5 +465,102 @@ it('correlates provider failures and preserves their error codes', function (): 
         expect($sender->messages)->toHaveCount(1)
             ->and($sender->messages[0]['message']['reply_to'] ?? null)->toBe($id)
             ->and($sender->messages[0]['message']['payload']['code'])->toBe('solve_timeout');
+    });
+});
+
+it('responds to each stage with either an ACK or a correlated error', function (string $outcome): void {
+    run(function () use ($outcome): void {
+        $provider = new class($outcome) extends BaseProvider
+        {
+            public bool $staged = false;
+
+            public function __construct(private string $outcome) {}
+
+            public function requestAction(Game $game, Closure $callback): void {}
+
+            public function stage(Game $game): void
+            {
+                $this->staged = true;
+                if ($this->outcome === 'send_failure') {
+                    throw PokerException::providerUnavailable();
+                }
+            }
+        };
+        $manager = new PokerManager;
+        $manager->extend($manager->getDefaultProvider(), fn (): ProviderInterface => $provider);
+        $sender = new SenderSpy;
+        $previous = InMemoryGameDatabase::install();
+        try {
+            $service = new GameService(new CreditService, $manager);
+            $user = new User(['id' => 1, 'is_vip' => true]);
+            $players = [
+                ['seat' => 1, 'name' => 'Hero', 'hero' => true, 'stack' => 100, 'seat_type' => 'SB'],
+                ['seat' => 2, 'name' => 'Villain', 'hero' => false, 'stack' => 100, 'seat_type' => 'BB'],
+            ];
+            $game = $service->create($user, 'stage-test', 1, $players, (string) Str::uuid(), [], NetworkEnum::WPK);
+            $service->append($user, $game->uuid, (string) Str::uuid(), 'force_bet', ['small_blind' => 1, 'big_blind' => 2]);
+            $service->append($user, $game->uuid, (string) Str::uuid(), 'hand_card', ['cards' => ['As', 'Kd']]);
+            $validator = di(ValidatorFactoryInterface::class);
+            $server = new PokerServer($sender, $manager, new UserTokenService, $service, $validator, new NullLogger, new InsuranceService(di(ValidatorFactoryInterface::class), new UserGameConfigService));
+            $user = new User(['id' => 1]);
+            $token = new UserToken;
+            $connection = new PokerServerConnectionVo(95, $user, $token);
+            $connections = new ReflectionProperty($server, 'connections');
+            $connections->setValue($server, [95 => $connection]);
+            $id = (string) Str::uuid();
+            $server->onMessage(null, websocketFrame(95, json_encode([
+                'id' => $id, 'type' => 'stage_start', 'timestamp' => (int) floor(microtime(true) * 1000),
+                'payload' => ['hand_uuid' => $game->uuid, 'stage' => $outcome === 'invalid' ? 'invalid' : 'preflop', 'cards' => []],
+            ], JSON_THROW_ON_ERROR)));
+            expect($sender->messages)->toHaveCount(1)
+                ->and($sender->messages[0]['message'])->toMatchArray([
+                    'type' => $outcome === 'success' ? 'stage_start.ack' : 'error',
+                    'reply_to' => $id,
+                ])
+                ->and($provider->staged)->toBe($outcome !== 'invalid');
+            if ($outcome === 'success') {
+                expect($sender->messages[0]['message']['payload']['hand_uuid'])->toBe($game->uuid);
+            } else {
+                expect($sender->messages[0]['message']['payload']['code'])->toBe($outcome === 'invalid' ? 'event_invalid' : 'provider_unavailable');
+            }
+        } finally {
+            $container = ApplicationContext::getContainer();
+            if (! $container instanceof Container) {
+                throw new LogicException('Mutable test container required');
+            }
+            $container->set(ConnectionResolverInterface::class, $previous);
+        }
+    });
+})->with(['success', 'send_failure', 'invalid']);
+
+it('acknowledges insurance advice once and records only confirmed hero purchases', function (): void {
+    run(function (): void {
+        $user = TestData::user();
+        $game = TestData::game($user, ['network' => NetworkEnum::OK, 'status' => GameStatusEnum::OPEN]);
+        $sender = new SenderSpy;
+        $manager = new PokerManager;
+        $server = new PokerServer($sender, $manager, new UserTokenService, new GameService(new CreditService, $manager), di(ValidatorFactoryInterface::class), new NullLogger, new InsuranceService(di(ValidatorFactoryInterface::class), new UserGameConfigService));
+        (new ReflectionProperty($server, 'connections'))->setValue($server, [96 => new PokerServerConnectionVo(96, $user, new UserToken)]);
+        $quote = ['hand_uuid' => $game->uuid, 'pot_id' => 1, 'stage' => 'flop', 'outs' => ['6s', '6h'], 'remaining_card_num' => 35, 'odds' => '16', 'breakeven' => 9, 'min_insurance' => 0, 'max_insurance' => 18, 'pot' => 299];
+        $send = function (string $type, string $id, array $payload) use ($server): void {
+            $server->onMessage(null, websocketFrame(96, json_encode(['type' => $type, 'id' => $id, 'timestamp' => (int) floor(microtime(true) * 1000), 'payload' => $payload], JSON_THROW_ON_ERROR)));
+        };
+        $id = (string) Str::uuid();
+        $send(GameEvent::REQUEST_INSURANCE, $id, $quote);
+        expect($sender->messages)->toHaveCount(1)->and($sender->messages[0]['message'])->toMatchArray(['type' => 'request_insurance.ack', 'reply_to' => $id, 'payload' => ['hand_uuid' => $game->uuid, 'amount' => null]]);
+        expect(UserInsurance::query()->where('game_id', $game->id)->count())->toBe(0);
+        $game->update(['status' => GameStatusEnum::CLOSED]);
+        $purchase = (string) Str::uuid();
+        $send(GameEvent::INSURANCE_SUBMITTED, $purchase, $quote + ['amount' => 9]);
+        $send(GameEvent::INSURANCE_SUBMITTED, $purchase, $quote + ['amount' => 9]);
+        expect($sender->messages)->toHaveCount(3)->and($sender->messages[1]['message'])->toMatchArray(['type' => 'insurance_submitted.ack', 'reply_to' => $purchase]);
+        expect($sender->messages[2]['message']['type'])->toBe('insurance_submitted.ack');
+        expect(UserInsurance::query()->where('game_id', $game->id)->count())->toBe(1)->and($game->events()->count())->toBe(0);
+        $send(GameEvent::INSURANCE_SUBMITTED, $purchase, $quote + ['amount' => 10]);
+        expect($sender->messages[3]['message'])->toMatchArray(['type' => 'error', 'reply_to' => $purchase]);
+        expect($sender->messages[3]['message']['payload']['code'])->toBe('event_conflict');
+        $send(GameEvent::INSURANCE_SUBMITTED, (string) Str::uuid(), array_replace($quote, ['pot_id' => 2, 'odds' => '2.200000047683716', 'amount' => 9]));
+        expect($sender->messages[4]['message']['type'])->toBe('insurance_submitted.ack');
+        expect(UserInsurance::query()->where('game_id', $game->id)->where('pot_id', 2)->firstOrFail()->odds)->toBe('2.200000047683716000');
     });
 });

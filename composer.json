@@ -15,6 +15,7 @@
         "php": "^8.4",
         "ext-redis": "*",
         "ext-swoole": ">=6.2.1",
+        "brick/math": "^0.18",
         "hyperf/amqp": "~3.2.0",
         "hyperf/async-queue": "~3.2.0",
         "hyperf/cache": "~3.2.0",

@@ -149,6 +149,8 @@ it('calculates only the Hero share and rejects a second settlement', function (a
         expect($game->events()->where('type', GameEvent::HAND_OVER)->count())->toBe(1);
     });
 })->with([
+    [[['name' => 'Hero', 'amount' => 2003]], 2003], // 725 main pot + 1278 side pot.
+    [[['name' => 'Villain', 'amount' => 725], ['name' => 'Hero', 'amount' => 1278]], 1278],
     [[['name' => 'Hero', 'amount' => 1093]], 1093],
     [[['name' => 'Villain', 'amount' => 546], ['name' => 'Hero', 'amount' => 547]], 547],
     [[['name' => 'Third', 'amount' => 364], ['name' => 'Hero', 'amount' => 365], ['name' => 'Villain', 'amount' => 364]], 365],

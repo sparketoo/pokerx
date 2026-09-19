@@ -12,6 +12,8 @@ use App\Game\Providers\ProtoProvider;
 use App\Model\UserToken;
 use App\Service\CreditService;
 use App\Service\GameService;
+use App\Service\InsuranceService;
+use App\Service\UserGameConfigService;
 use App\Service\UserTokenService;
 use App\Vo\Game\PokerServerMessageVo;
 use App\Vo\Game\RequestActionResultVo;
@@ -83,6 +85,7 @@ it('validates extra bet payloads at the websocket boundary before storing them',
             \App\Support\di(Sender::class), $manager,
             new UserTokenService, $service,
             \App\Support\di(ValidatorFactoryInterface::class), new NullLogger,
+            new InsuranceService(\App\Support\di(ValidatorFactoryInterface::class), new UserGameConfigService),
         );
         $players = [
             ['seat' => 1, 'name' => 'Hero', 'hero' => true, 'stack' => 1000, 'seat_type' => 'SB'],

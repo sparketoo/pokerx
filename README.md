@@ -203,6 +203,12 @@ credits 为数据库中的积分余额，单位为最小积分单位。
 
 无请求字段。临时设置只保存在客户端的 state 中，取消即丢弃 state，不会关闭已启用的双因素认证。
 
+### 用户游戏配置
+
+读取使用 `GET /api/mine/game_config?network=ok`，保存使用 `POST /api/mine/game_config/save`，配置项统一为 `key/value`。接口需要登录，按用户与平台隔离。
+
+保险配置使用 `insurance_outs_1` 至 `insurance_outs_8` 和 `insurance_default`；`value: null` 清除配置。精确项和默认项都未配置时，`request_insurance.ack` 返回 `amount: null`，不提供内置策略。完整请求、响应和新表结构见 [用户游戏配置与保险策略](docs/insurance-strategy-design.md)。
+
 ### 列表查询和分页
 
 列表请求通用参数：
@@ -621,7 +627,13 @@ hand_uuid 与两张 cards 必填。该事件只表示当前客户端的 Hero 手
       }
     }
 
-hand_uuid 必填。当前版本保存完整 payload；Provider 使用 stage 和 cards 构建上游历史。回执为 stage_start.ack。
+hand_uuid 必填。当前版本保存完整 payload；ProtoProvider 在保存事件后立即发送从开局至当前阶段的完整有序 `gameEvents`，
+包括已保存的玩家、强制注、手牌及行动；无需请求建议也会同步。后续阶段重复携带已有
+历史，由上游按前缀去重。回执为 stage_start.ack，只确认本地保存与本次发送，不代表上游成功 ACK。
+
+校验、连接或发送失败通过统一的 `error` 应答返回，`reply_to` 对应原始事件 ID，不再发送成功 ACK。
+上游在本次处理结束后返回的拒绝由 Provider 记录日志并使该手的已发送状态失效，不追加阶段错误推送；
+后续同步仍发送完整历史，结算时若缺少有效的已发送记录则先补发历史。
 
 #### player_acted
 
@@ -694,9 +706,9 @@ action 可为 fold、check、call、bet、raise、all-in。只有这个事件会
 
 hand_uuid 和非空 winners 数组必填；每项的 name 必须是本手玩家且不能重复，amount 为非负安全整数（最大 9007199254740991），拒绝小数和数字字符串。单赢家也用单项数组，不再接受旧 winner 字段。shown 可选，出现时每项均须含 name 和两张 cards，表示实际摊牌者，与赢家名单独立。
 
-winners 只表示主池获奖者及各自实际分配的金额，不包括边池收益；按游戏平台实际结果上报，不自行平均分配或调整余数筹码。该列表保存在 events.payload JSON 内，无需新增表。旧数据如含 winner，应一次性转成单项 winners；前后端须协调更新。
+winners 表示所有奖池（主池和全部边池）的获奖者及实际派彩金额；同一玩家跨池获奖须按 name 合并为一项，amount 为各池实际所得之和（非净盈利），只赢边池的玩家也必须包含。按游戏平台实际结果上报，不自行平均分配或调整余数筹码。Proto 的多条 playerWon 同样表示所有奖池的获奖结果，不限于主池；无需另设 settlement_winners。该列表保存在 events.payload JSON 内，无需新增表。旧数据如含 winner，应一次性转成单项 winners；前后端须协调更新。
 
-成功后状态从 OPEN 变为 CLOSED（不会进入 SETTLED）；winnings 为 winners 中 Hero 的金额，没有 Hero 则为 0；profit = winnings - bet_amount。这里仍是主池结算口径，不能代表包含边池收益的完整盈亏。回执为 hand_over.ack，确认的是本地保存；第三方异步拒绝继续通过 hand_over.error 反馈，不代表第三方已确认入账。
+成功后状态从 OPEN 变为 CLOSED（不会进入 SETTLED）；winnings 为 winners 中 Hero 的金额，没有 Hero 则为 0；profit = winnings - bet_amount。winnings 包含主池和边池所得；历史漏报记录不会自动补齐。回执为 hand_over.ack，确认的是本地保存；第三方异步拒绝继续通过 hand_over.error 反馈，不代表第三方已确认入账。
 
 ProtoProvider 在一次 fullGameLog 中为每位赢家生成一条 playerWon，随后仅生成一条 gameOver；实际 handShown 在这些获奖事件之前。实时上报与 hand_refresh 使用相同结算校验。
 
@@ -726,7 +738,12 @@ PokerManager 和 Provider 均按 Hyperf Worker 常驻。首次使用 proto Provi
 由于上游只用牌局 ID 关联响应，超时后会断开该上游连接，其他在途请求也返回连接不可用，
 连接循环随后重连；客户端可按当前行动机会手动重试。
 
-hand_card、stage_start、player_acted、known_play_cards 的 Provider 空实现是当前设计；只有 request_action 会向上游发送请求。设置 POKER_PROVIDER=mock 可使用本地模拟 Provider。
+hand_card、player_acted、known_play_cards 的 ProtoProvider 方法仍不单独发送；
+每次 stage_start 主动同步完整历史，request_action 仍先同步最新历史再请求建议。
+Provider 按当前连接记录已发送过 gameEvents 的牌局（非上游确认）；断开或重建连接清除此记录。
+hand_over 若在当前连接没有该手发送记录，先补发不含结算事件的完整 gameEvents，再发送 fullGameLog。
+同步写入失败则停止后续结算发送，异步拒绝继续反馈。完成或 abort 后清理该手发送记录。
+发送记录最多保留 1024 手，淘汰的记录在结算时按未同步处理，不自动重发已提交结算。设置 POKER_PROVIDER=mock 可使用本地模拟 Provider。
 
 ## 开发校验
 
@@ -735,3 +752,5 @@ hand_card、stage_start、player_acted、known_play_cards 的 Provider 空实现
     composer pint
 
 发布前应使用独立 MySQL、Redis 和端口补充覆盖登录、WebSocket 建局、事件写入、hand_over 状态与 Provider 回调的集成测试。
+
+第三方建议请求返回 error 文本时，request_action 的错误回包保留 provider_rejected 错误码，message 原样返回服务报错内容，前端优先展示原文。没有可用错误文本的无效建议仍使用通用提示。
