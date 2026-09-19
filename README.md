@@ -729,6 +729,8 @@ WPK 的 room_number 使用精确保留的原生逐手 gameid 字符串，hand_nu
 已有数据库上线前必须执行 `2026_09_18_000008_add_wpk_and_abort_enums.php`，
 该迁移仅添加 WPK 网络与 ABORT 状态的枚举值，不修改牌局身份或唯一约束。
 
+第三方建议请求返回 error 文本时，request_action 的错误回包保留 provider_rejected 错误码，message 原样返回服务报错内容，前端优先展示原文。没有可用错误文本的无效建议仍使用通用提示。
+
 ### Provider 连接模型
 
 PokerManager 和 Provider 均按 Hyperf Worker 常驻。首次使用 proto Provider 时，服务会启动到 PROTO_URL 的连接循环；连接断开后 SocketProvider 自动重连。一个连接可处理多局游戏，上游以 game_uuid（Proto 的 gameId）关联请求和响应。
@@ -752,5 +754,3 @@ hand_over 若在当前连接没有该手发送记录，先补发不含结算事�
     composer pint
 
 发布前应使用独立 MySQL、Redis 和端口补充覆盖登录、WebSocket 建局、事件写入、hand_over 状态与 Provider 回调的集成测试。
-
-第三方建议请求返回 error 文本时，request_action 的错误回包保留 provider_rejected 错误码，message 原样返回服务报错内容，前端优先展示原文。没有可用错误文本的无效建议仍使用通用提示。

@@ -436,13 +436,17 @@ it('upserts a hand refresh and returns the stable hand UUID in its acknowledgeme
     });
 });
 
-it('correlates provider failures and preserves their error codes', function (): void {
-    run(function (): void {
-        $provider = new class extends BaseProvider
+it('correlates provider failures and preserves their error codes', function (bool $upstream): void {
+    run(function () use ($upstream): void {
+        $provider = new class($upstream) extends BaseProvider
         {
+            public function __construct(private bool $upstream) {}
+
             public function requestAction(Game $game, Closure $callback): void
             {
-                $callback(RequestActionResultVo::failure(PokerException::solveTimeout()));
+                $callback($this->upstream
+                    ? RequestActionResultVo::failure(PokerException::providerRejected(), str_repeat('Player Arven cannot check; ', 20))
+                    : RequestActionResultVo::failure(PokerException::solveTimeout()));
             }
         };
         $manager = new PokerManager;
@@ -464,9 +468,12 @@ it('correlates provider failures and preserves their error codes', function (): 
         $server->handleRequestAction(new PokerServerMessageVo(99, $user, $token, $id, GameEvent::REQUEST_ACTION, ['hand_uuid' => $game->uuid], 0));
         expect($sender->messages)->toHaveCount(1)
             ->and($sender->messages[0]['message']['reply_to'] ?? null)->toBe($id)
-            ->and($sender->messages[0]['message']['payload']['code'])->toBe('solve_timeout');
+            ->and($sender->messages[0]['message']['payload']['code'])->toBe($upstream ? 'provider_rejected' : 'solve_timeout')
+            ->and($sender->messages[0]['message']['payload']['message'])->toBe($upstream
+                ? str_repeat('Player Arven cannot check; ', 20)
+                : PokerException::solveTimeout()->getMessage());
     });
-});
+})->with([false, true]);
 
 it('responds to each stage with either an ACK or a correlated error', function (string $outcome): void {
     run(function () use ($outcome): void {

@@ -77,7 +77,7 @@ final class ProtoProvider extends SocketJsonProvider
                 $this->rejectSettlement($gameId, (string) $message['error']);
             } elseif ($gameId !== null && $this->hasRequestActionCallback($gameId)) {
                 $this->callRequestActionCallback($gameId, RequestActionResultVo::failure(PokerException::providerRejected(),
-                    is_string($message['error']) ? $message['error'] : null));
+                    is_string($message['error']) && $message['error'] !== '' ? $message['error'] : null));
             }
 
             return;
@@ -105,7 +105,7 @@ final class ProtoProvider extends SocketJsonProvider
 
         if (isset($message['error'])) {
             $result = RequestActionResultVo::failure(PokerException::providerRejected(),
-                is_string($message['error']) ? $message['error'] : null);
+                is_string($message['error']) && $message['error'] !== '' ? $message['error'] : null);
             $this->callRequestActionCallback($message['gameId'], $result);
 
             return;

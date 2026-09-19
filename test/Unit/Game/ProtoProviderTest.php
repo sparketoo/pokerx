@@ -61,12 +61,15 @@ it('rejects invalid advice immediately instead of leaving the request pending', 
         try {
             $provider->handlePlayerAction(['gameId' => 'test-hand', ...$advice]);
             expect($results)->toHaveCount(1)
-                ->and($results[0]->error_code)->toBe('provider_rejected');
+                ->and($results[0]->error_code)->toBe('provider_rejected')
+                ->and($results[0]->reason)->toBe(PokerException::providerRejected()->getMessage());
         } finally {
             $provider->close();
         }
     });
 })->with([
+    [['error' => '']],
+    [['error' => ['invalid' => 'error payload']]],
     [['action' => 'unknown', 'amount' => 0]],
     [['action' => 'bet', 'amount' => -1]],
     [['action' => 'bet', 'amount' => 1.25]],
