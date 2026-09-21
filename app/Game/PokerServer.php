@@ -15,7 +15,6 @@ use App\Exception\GatewayException;
 use App\Game\Providers\ProviderInterface;
 use App\Model\Game;
 use App\Service\GameService;
-use App\Service\InsuranceService;
 use App\Service\UserTokenService;
 use App\Vo\Game\PokerServerConnectionVo;
 use App\Vo\Game\PokerServerMessageVo;
@@ -45,7 +44,6 @@ final class PokerServer implements OnCloseInterface, OnMessageInterface, OnOpenI
         private readonly GameService $gameService,
         private readonly ValidatorFactoryInterface $validatorFactory,
         private readonly LoggerInterface $logger,
-        private readonly InsuranceService $insuranceService,
     ) {}
 
     /** @param  mixed  $server */
@@ -138,22 +136,11 @@ final class PokerServer implements OnCloseInterface, OnMessageInterface, OnOpenI
         );
         $game = $this->$method($message);
 
-        if ($type === GameEvent::REQUEST_ACTION || $type === GameEvent::REQUEST_INSURANCE) {
+        if ($type === GameEvent::REQUEST_ACTION) {
             return;
         }
 
         $this->reply($fd, $type.'.ack', ['hand_uuid' => $game->uuid], $id);
-    }
-
-    public function handleRequestInsurance(PokerServerMessageVo $message): void
-    {
-        $result = $this->insuranceService->suggest($message->user, $message->payload);
-        $this->reply($message->fd, GameEvent::REQUEST_INSURANCE.'.ack', $result, $message->id);
-    }
-
-    public function handleInsuranceSubmitted(PokerServerMessageVo $message): Game
-    {
-        return $this->insuranceService->submit($message->user, $message->id, $message->payload);
     }
 
     public function handleHandStart(PokerServerMessageVo $message): Game

@@ -402,7 +402,7 @@ final class GameService
             }
             $seen[] = $name;
             if ($name === $heroName) {
-                // Total actual awards from all pots, already aggregated per player by the adapter.
+                // Main-pot share only; side-pot proceeds are not part of this event.
                 $winnings = $amount;
             }
         }

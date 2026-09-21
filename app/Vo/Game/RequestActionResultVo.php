@@ -33,6 +33,6 @@ final class RequestActionResultVo extends Vo
     public static function failure(AppException $exception, ?string $reason = null): self
     {
         return new self(false, null, null, $exception->getErrorCode(),
-            $reason ?? $exception->getMessage());
+            mb_substr($reason ?? $exception->getMessage(), 0, 255));
     }
 }

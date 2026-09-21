@@ -31,17 +31,9 @@ final class ProtoProvider extends SocketJsonProvider
     /** @var array<string, array{callback: \Closure(string): void, timer: int}> */
     private array $settlements = [];
 
-    /**
-     * Sent on this connection, not acknowledged by the upstream.
-     *
-     * @var array<string, \stdClass&object{sent: bool}>
-     */
-    private array $sentGames = [];
-
     protected function onOpen(): void
     {
         $this->authenticated = false;
-        $this->sentGames = [];
         $this->connectionId = (string) Str::uuid();
         $this->frameSequence = 0;
         $this->logger()->info('Proto connection opened', ['connection_id' => $this->connectionId]);
@@ -70,14 +62,10 @@ final class ProtoProvider extends SocketJsonProvider
         }
         if (isset($message['error'])) {
             $gameId = isset($message['gameId']) ? (string) $message['gameId'] : null;
-            if ($gameId !== null) {
-                unset($this->sentGames[$gameId]);
-            }
             if ($gameId !== null && isset($this->settlements[$gameId])) {
                 $this->rejectSettlement($gameId, (string) $message['error']);
             } elseif ($gameId !== null && $this->hasRequestActionCallback($gameId)) {
-                $this->callRequestActionCallback($gameId, RequestActionResultVo::failure(PokerException::providerRejected(),
-                    is_string($message['error']) && $message['error'] !== '' ? $message['error'] : null));
+                $this->callRequestActionCallback($gameId, RequestActionResultVo::failure(PokerException::providerRejected()));
             }
 
             return;
@@ -104,8 +92,7 @@ final class ProtoProvider extends SocketJsonProvider
         }
 
         if (isset($message['error'])) {
-            $result = RequestActionResultVo::failure(PokerException::providerRejected(),
-                is_string($message['error']) && $message['error'] !== '' ? $message['error'] : null);
+            $result = RequestActionResultVo::failure(PokerException::providerRejected());
             $this->callRequestActionCallback($message['gameId'], $result);
 
             return;
@@ -139,42 +126,6 @@ final class ProtoProvider extends SocketJsonProvider
         $this->callRequestActionCallback($message['gameId'], $result);
     }
 
-    public function stage(Game $game): void
-    {
-        if (! $game->status->isOpen()) {
-            throw GatewayException::eventInvalid();
-        }
-        if (! $this->awaitAuthenticated((float) ($this->options['connect_timeout'] ?? 10))) {
-            throw PokerException::providerUnavailable();
-        }
-        if (! $this->sendGameEvents($game)) {
-            throw PokerException::providerUnavailable();
-        }
-    }
-
-    /** Publish a complete prefix; a close/rejection during the write invalidates the marker. */
-    private function sendGameEvents(Game $game): bool
-    {
-        $message = $this->gameEvents($game);
-        $marker = $this->sentGames[$game->uuid] ??= (object) ['sent' => false];
-        // Eviction only causes a safe full-prefix synchronization before settlement.
-        if (count($this->sentGames) > 1024) {
-            unset($this->sentGames[array_key_first($this->sentGames)]);
-        }
-        $sent = $this->send($message);
-        if (! $sent || ! $this->authenticated || ($this->sentGames[$game->uuid] ?? null) !== $marker) {
-            if (($this->sentGames[$game->uuid] ?? null) === $marker) {
-                unset($this->sentGames[$game->uuid]);
-            }
-
-            return false;
-        }
-
-        $marker->sent = true;
-
-        return true;
-    }
-
     public function requestAction(Game $game, \Closure $callback): void
     {
         if ($this->hasRequestActionCallback($game->uuid)) {
@@ -189,7 +140,7 @@ final class ProtoProvider extends SocketJsonProvider
         if (($this->requestActionCallbacks[$game->uuid] ?? null) !== $callback) {
             return;
         }
-        $synced = $this->sendGameEvents($game);
+        $synced = $this->send($this->gameEvents($game));
         $requested = $synced && $this->send([
             'structType' => 'getAnswer',
             'gameId' => $this->externalGameId($game),
@@ -257,7 +208,6 @@ final class ProtoProvider extends SocketJsonProvider
     {
         $this->logger()->info('Proto connection closed', ['connection_id' => $this->connectionId]);
         $this->authenticated = false;
-        $this->sentGames = [];
         foreach (array_keys($this->settlements) as $gameId) {
             $this->rejectSettlement($gameId, 'Connection closed; settlement delivery is unknown');
         }
@@ -278,7 +228,6 @@ final class ProtoProvider extends SocketJsonProvider
 
     public function abort(Game $game): void
     {
-        unset($this->sentGames[$game->uuid]);
         $this->callRequestActionCallback($game->uuid, RequestActionResultVo::failure(PokerException::solveStale()));
     }
 
@@ -306,15 +255,10 @@ final class ProtoProvider extends SocketJsonProvider
                 }),
             ];
         }
-        if (! ($this->sentGames[$game->uuid]->sent ?? false) && ! $this->sendGameEvents($game)) {
-            $this->rejectSettlement($game->uuid, 'Pre-settlement synchronization could not be sent');
-            throw PokerException::providerUnavailable();
-        }
         if (! $this->send($this->gameEvents($game, true))) {
             $this->rejectSettlement($game->uuid, 'Settlement could not be sent');
             throw PokerException::providerUnavailable();
         }
-        unset($this->sentGames[$game->uuid]);
     }
 
     private function rejectSettlement(string $gameId, string $reason): void
@@ -442,7 +386,6 @@ final class ProtoProvider extends SocketJsonProvider
                                 'cards' => implode(',', $shown['cards']),
                             ];
                         }
-                        // Each winner includes their actual main-pot and side-pot awards.
                         foreach ($payload['winners'] as $winner) {
                             $events[] = [
                                 'eventType' => 'playerWon',
@@ -470,6 +413,7 @@ final class ProtoProvider extends SocketJsonProvider
                 'gameId' => $this->externalGameId($game),
                 'pokerNetwork' => $this->options['network'] ?? 'WE',
                 'gameType' => 'NL',
+                'network' => $game->network->name,
                 'bigBlind' => $game->big_blind,
                 'ante' => $game->ante,
                 'currency' => 'USDT',
