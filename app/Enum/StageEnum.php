@@ -14,7 +14,6 @@ enum StageEnum
     case FLOP;
     case TURN;
     case RIVER;
-    case SHOWDOWN;
 
     public function isPreflop(): bool
     {
@@ -34,10 +33,5 @@ enum StageEnum
     public function isRiver(): bool
     {
         return $this->is(self::RIVER);
-    }
-
-    public function isShowdown(): bool
-    {
-        return $this->is(self::SHOWDOWN);
     }
 }

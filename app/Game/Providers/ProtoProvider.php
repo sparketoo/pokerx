@@ -4,424 +4,368 @@ declare(strict_types=1);
 
 namespace App\Game\Providers;
 
-use App\Constants\GameEvent;
 use App\Enum\ActionEnum;
 use App\Enum\StageEnum;
-use App\Exception\GatewayException;
-use App\Exception\PokerException;
-use App\Model\Game;
-use App\Model\GamePlayer;
+use App\Exception\GameException;
+use App\Vo\Game\CardVo;
+use App\Vo\Game\GameEventVo;
+use App\Vo\Game\GameVo;
 use App\Vo\Game\RequestActionResultVo;
-use Carbon\CarbonImmutable;
-use Hyperf\Stringable\Str;
-use Swoole\Coroutine;
-use Swoole\Timer;
+use Closure;
+use Hyperf\Engine\Contract\Http\ClientInterface;
+use Hyperf\Engine\Http\Client;
+use Hyperf\Redis\Redis;
+use JsonException;
 use Throwable;
 
-final class ProtoProvider extends SocketJsonProvider
+use function App\Support\di;
+
+final class ProtoProvider extends BaseProvider
 {
-    private bool $authenticated = false;
+    private const int SESSION_TTL = 280;
 
-    private ?string $sessionId = null;
+    /** @var array<string, true> */
+    private array $pendingActions = [];
 
-    private int $frameSequence = 0;
+    /**
+     * @param  array<string, mixed>  $options
+     * @param  null|Closure(string, int, bool): ClientInterface  $clientFactory
+     */
+    public function __construct(
+        private readonly array $options = [],
+        private readonly ?Closure $clientFactory = null,
+        private readonly ?Redis $redis = null,
+    ) {}
 
-    private ?string $connectionId = null;
-
-    /** @var array<string, array{callback: \Closure(string): void, timer: int}> */
-    private array $settlements = [];
-
-    protected function onOpen(): void
+    public function requestAction(GameVo $game, Closure $callback): void
     {
-        $this->authenticated = false;
-        $this->connectionId = (string) Str::uuid();
-        $this->frameSequence = 0;
-        $this->logger()->info('Proto connection opened', ['connection_id' => $this->connectionId]);
-        $authentication = array_filter([
-            'token' => $this->options['token'] ?? '',
-            'sessionId' => $this->sessionId,
-            'descr' => 'PokerX',
-        ], static fn (?string $value): bool => $value !== null);
-        if (! $this->send($authentication)) {
-            throw new \RuntimeException('Proto authentication could not be sent');
+        if (isset($this->pendingActions[$game->uuid])) {
+            throw GameException::requestActionInProgress();
         }
+        $this->pendingActions[$game->uuid] = true;
+        try {
+            $response = $this->withSession($game, function (string $sessionId) use ($game): array {
+                $this->expectAcknowledgement($this->command($this->gameEvents($game), $sessionId), 'gameEvents');
+
+                return $this->command([
+                    'structType' => 'getAnswer',
+                    'gameId' => $game->uuid,
+                    'potForAlpha' => $game->pot(),
+                    'delay' => (int) ($this->options['delay'] ?? 9000),
+                ], $sessionId);
+            });
+            $result = $this->actionResult($response, $game->uuid);
+        } catch (Throwable $error) {
+            $result = RequestActionResultVo::failure($error instanceof GameException
+                ? $error : GameException::providerFailed($error->getMessage()));
+        } finally {
+            unset($this->pendingActions[$game->uuid]);
+        }
+
+        $callback($result);
     }
 
-    protected function onMessage(array $message, int $opcode): void
+    public function over(GameEventVo $event): void
     {
-        if (isset($message['gameId'])) {
-            $message['gameId'] = $this->internalGameId((string) $message['gameId']);
+        try {
+            $this->withSession($event->game, function (string $sessionId) use ($event): void {
+                $this->expectAcknowledgement($this->command($this->gameEvents($event->game, true), $sessionId),
+                    'fullGameLog');
+            });
+            $this->logger()->info('Proto HTTP fullGameLog acknowledged', [
+                'game_id' => $event->game->uuid,
+            ]);
+        } catch (Throwable $error) {
+            $this->logger()->warning('Proto HTTP fullGameLog failed', [
+                'game_id' => $event->game->uuid,
+                'exception' => $error::class,
+                'message' => $error->getMessage(),
+            ]);
         }
-        if (array_key_exists('result', $message)) {
-            $this->authenticated = ($message['result'] ?? false) === true;
-            if ($this->authenticated) {
-                $this->sessionId = isset($message['sessionId']) ? (string) $message['sessionId'] : null;
-            }
-
-            return;
-        }
-        if (isset($message['error'])) {
-            $gameId = isset($message['gameId']) ? (string) $message['gameId'] : null;
-            if ($gameId !== null && isset($this->settlements[$gameId])) {
-                $this->rejectSettlement($gameId, (string) $message['error']);
-            } elseif ($gameId !== null && $this->hasRequestActionCallback($gameId)) {
-                $this->callRequestActionCallback($gameId, RequestActionResultVo::failure(PokerException::providerRejected()));
-            }
-
-            return;
-        }
-        if (empty($message['gameId']) || empty($message['structType'])) {
-            return;
-        }
-        $type = $message['structType'];
-        $method = 'handle'.Str::studly($type);
-        if (! method_exists($this, $method)) {
-            return;
-        }
-
-        $this->$method($message);
     }
 
     /**
-     * @param  array<string,mixed>  $message
+     * @template T
+     *
+     * @param  Closure(string): T  $operation
+     * @return T
      */
-    public function handlePlayerAction(array $message): void
+    private function withSession(GameVo $game, Closure $operation): mixed
     {
-        if (! $this->hasRequestActionCallback($message['gameId'])) {
-            return;
+        $key = 'proto-http:session:user:'.$game->userId;
+        $redis = $this->redis ?? di(Redis::class);
+
+        $sessionId = $redis->get($key);
+        if (! is_string($sessionId) || $sessionId === '') {
+            $token = (string) ($this->options['token'] ?? '');
+            $response = $this->command(['token' => $token, 'descr' => 'PokerX']);
+            if (($response['result'] ?? null) !== true || ! is_string($response['sessionId'] ?? null)
+                || $response['sessionId'] === '') {
+                throw GameException::providerFailed((string) ($response['info'] ?? 'Proto HTTP authentication failed'));
+            }
+
+            $sessionId = $response['sessionId'];
+        }
+        $redis->setex($key, self::SESSION_TTL, $sessionId);
+
+        try {
+            return $operation($sessionId);
+        } catch (GameException $error) {
+            if (($error->context()['proto_http_session_invalid'] ?? false) === true) {
+                $redis->del($key);
+            }
+
+            throw $error;
+        }
+    }
+
+    /**
+     * @param  array<string, mixed>  $payload
+     * @return array<string, mixed>
+     */
+    private function command(array $payload, ?string $sessionId = null): array
+    {
+        $parts = parse_url((string) ($this->options['url'] ?? '')) ?: [];
+        $ssl = ($parts['scheme'] ?? null) === 'https';
+        $host = (string) ($parts['host'] ?? '');
+        $port = $parts['port'] ?? ($ssl ? 443 : 80);
+        $path = rtrim($parts['path'] ?? '', '/');
+        if (! str_ends_with($path, '/api/command')) {
+            $path .= '/api/command';
+        }
+        $query = [];
+        if (! empty($parts['query'])) {
+            parse_str($parts['query'], $query);
         }
 
-        if (isset($message['error'])) {
-            $result = RequestActionResultVo::failure(PokerException::providerRejected());
-            $this->callRequestActionCallback($message['gameId'], $result);
-
-            return;
+        $headers = ['Content-Type' => ['application/json']];
+        $pid = (string) ($this->options['player_id'] ?? '');
+        if ($pid !== '') {
+            $headers['X-Player-Id'] = [$pid];
+            $query['pid'] = $pid;
         }
-        if (! is_string($message['action'] ?? null) || $message['action'] === '') {
-            $this->callRequestActionCallback($message['gameId'], RequestActionResultVo::failure(PokerException::providerRejected()));
-
-            return;
+        if ($sessionId !== null) {
+            $headers['X-Session-Id'] = [$sessionId];
         }
-        // Live Proto responses use both all-in and all-In; keep our action names canonical.
-        $action = match (strtolower($message['action'])) {
+
+        if ($query !== []) {
+            $path .= '?'.http_build_query($query, '', '&', PHP_QUERY_RFC3986);
+        }
+
+        $factory = $this->clientFactory ?? static fn (
+            string $host,
+            int $port,
+            bool $ssl
+        ): ClientInterface => new Client($host, $port, $ssl);
+        $client = $factory($host, $port, $ssl);
+        $settings = [
+            'timeout' => (float) ($this->options['request_timeout'] ?? 10),
+            'connect_timeout' => (float) ($this->options['connect_timeout'] ?? 5),
+        ];
+        if ($ssl) {
+            $settings['ssl_verify_peer'] = true;
+            $settings['ssl_host_name'] = $host;
+        }
+        try {
+            if (! $client->set($settings)) {
+                throw GameException::providerFailed('Proto HTTP client configuration failed');
+            }
+            $response = $client->request('POST', $path, $headers,
+                json_encode($payload, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE));
+        } finally {
+            if ($client instanceof Client) {
+                $client->close();
+            }
+        }
+        try {
+            $body = json_decode($response->getBody(), true, 512, JSON_THROW_ON_ERROR);
+        } catch (JsonException $error) {
+            throw GameException::providerFailed('Proto HTTP returned invalid JSON: '.$error->getMessage());
+        }
+        if (! is_array($body)) {
+            throw GameException::providerFailed('Proto HTTP returned invalid response');
+        }
+        if (($body['error'] ?? null) === 'invalid sessionId') {
+            throw GameException::providerFailed('Proto HTTP session expired')
+                ->withContext(['proto_http_session_invalid' => true]);
+        }
+        if ($response->getStatusCode() < 200 || $response->getStatusCode() >= 300 || isset($body['error'])) {
+            $reason = $body['error'] ?? 'HTTP '.$response->getStatusCode();
+            throw GameException::providerFailed(is_string($reason) ? $reason : 'Proto HTTP request failed');
+        }
+
+        return $body;
+    }
+
+    /** @param  array<string, mixed>  $response */
+    private function expectAcknowledgement(array $response, string $command): void
+    {
+        if (($response['result'] ?? null) !== true) {
+            throw GameException::providerFailed('Proto HTTP '.$command.' was not acknowledged');
+        }
+    }
+
+    /** @param  array<string, mixed>  $response */
+    private function actionResult(array $response, string $gameId): RequestActionResultVo
+    {
+        if (($response['structType'] ?? null) !== 'playerAction' || ($response['gameId'] ?? null) !== $gameId) {
+            throw GameException::providerFailed('Proto HTTP returned an unexpected action response');
+        }
+        $action = is_string($response['action'] ?? null) ? match (strtolower($response['action'])) {
             'fold' => ActionEnum::FOLD,
+            'check' => ActionEnum::CHECK,
             'call' => ActionEnum::CALL,
             'bet' => ActionEnum::BET,
             'raise' => ActionEnum::RAISE,
             'all-in' => ActionEnum::ALL_IN,
-            'check' => ActionEnum::CHECK,
             default => null,
-        };
+        } : null;
         if ($action === null) {
-            $this->callRequestActionCallback($message['gameId'], RequestActionResultVo::failure(PokerException::providerRejected()));
-
-            return;
+            throw GameException::providerFailed('Proto HTTP returned an unsupported action');
         }
 
-        try {
-            $result = RequestActionResultVo::success($action, $message['amount'] ?? 0);
-        } catch (\InvalidArgumentException|\TypeError) {
-            $result = RequestActionResultVo::failure(PokerException::providerRejected());
-        }
-        $this->callRequestActionCallback($message['gameId'], $result);
-    }
-
-    public function requestAction(Game $game, \Closure $callback): void
-    {
-        if ($this->hasRequestActionCallback($game->uuid)) {
-            throw PokerException::solveInProgress();
-        }
-        $this->setRequestActionCallback($game->uuid, $callback);
-        if (! $this->awaitAuthenticated((float) ($this->options['connect_timeout'] ?? 10))) {
-            $this->callRequestActionCallback($game->uuid, RequestActionResultVo::failure(PokerException::providerRejected()));
-
-            return;
-        }
-        if (($this->requestActionCallbacks[$game->uuid] ?? null) !== $callback) {
-            return;
-        }
-        $synced = $this->send($this->gameEvents($game));
-        $requested = $synced && $this->send([
-            'structType' => 'getAnswer',
-            'gameId' => $this->externalGameId($game),
-            'potForAlpha' => $game->pot,
-            'delay' => (int) ($this->options['delay'] ?? 9000),
-        ]);
-        if (! $requested) {
-            $this->callRequestActionCallback($game->uuid, RequestActionResultVo::failure(PokerException::providerRejected()));
-
-            return;
-        }
-    }
-
-    /** One record per wire frame; business handlers never repeat the payload. */
-    protected function onFrame(string $direction, string $data, int $opcode, ?bool $sent = null): void
-    {
-        $context = [
-            'connection_id' => $this->connectionId,
-            'sequence' => ++$this->frameSequence,
-            'direction' => $direction,
-            'opcode' => $opcode,
-            'bytes' => strlen($data),
-        ];
-        if ($sent !== null) {
-            $context['sent'] = $sent;
-        }
-        $message = $opcode === 1 ? json_decode($data, true) : null;
-        if (is_array($message)) {
-            $context['message'] = $this->redact($message);
-        } elseif ($opcode === 1) {
-            // Never log unknown raw bytes: malformed authentication may contain secrets.
-            $context['invalid_json'] = true;
-        }
-        $level = $sent === false || (is_array($message) && (isset($message['error']) || ($message['result'] ?? null) === false))
-            ? 'warning' : (in_array($opcode, [9, 10], true) ? 'debug' : 'info');
-        $this->logger()->log($level, 'Proto frame', $context);
-    }
-
-    /** @param array<array-key, mixed> $message
-     * @return array<array-key, mixed>
-     */
-    private function redact(array $message): array
-    {
-        foreach ($message as $key => $value) {
-            if (in_array(strtolower((string) $key), ['token', 'sessionid', 'authorization', 'password', 'secret'], true)) {
-                $message[$key] = '[redacted]';
-            } elseif (is_array($value)) {
-                $message[$key] = $this->redact($value);
-            }
-        }
-
-        return $message;
-    }
-
-    protected function onError(Throwable $error): void
-    {
-        $this->logger()->warning('Proto provider connection error', [
-            'connection_id' => $this->connectionId,
-            'exception' => $error::class,
-            'message' => $error->getMessage(),
-        ]);
-    }
-
-    protected function onClose(): void
-    {
-        $this->logger()->info('Proto connection closed', ['connection_id' => $this->connectionId]);
-        $this->authenticated = false;
-        foreach (array_keys($this->settlements) as $gameId) {
-            $this->rejectSettlement($gameId, 'Connection closed; settlement delivery is unknown');
-        }
-    }
-
-    private function awaitAuthenticated(float $timeout): bool
-    {
-        if (! $this->awaitConnection($timeout)) {
-            return false;
-        }
-        $deadline = microtime(true) + max(0, $timeout);
-        while (! $this->authenticated && microtime(true) < $deadline) {
-            Coroutine::sleep(0.01);
-        }
-
-        return $this->authenticated;
-    }
-
-    public function abort(Game $game): void
-    {
-        $this->callRequestActionCallback($game->uuid, RequestActionResultVo::failure(PokerException::solveStale()));
-    }
-
-    /** The callback reports failures only: Proto never acknowledges successful fullGameLog. */
-    public function over(Game $game, ?\Closure $onError = null): void
-    {
-        if ($game->status->isAbort()) {
-            throw GatewayException::eventInvalid();
-        }
-        // Errors carry only gameId; retire any solve before the settlement phase.
-        $this->callRequestActionCallback($game->uuid, RequestActionResultVo::failure(PokerException::solveStale()));
-        if (! $this->awaitAuthenticated((float) ($this->options['connect_timeout'] ?? 10))) {
-            throw PokerException::providerUnavailable();
-        }
-        $gameId = $game->uuid;
-        if ($onError !== null) {
-            if (isset($this->settlements[$game->uuid])) {
-                Timer::clear($this->settlements[$game->uuid]['timer']);
-            }
-            // Bound retained callbacks; expiry is NOT a confirmation of success.
-            $this->settlements[$game->uuid] = [
-                'callback' => $onError,
-                'timer' => Timer::after(60000, function () use ($gameId): void {
-                    unset($this->settlements[$gameId]);
-                }),
-            ];
-        }
-        if (! $this->send($this->gameEvents($game, true))) {
-            $this->rejectSettlement($game->uuid, 'Settlement could not be sent');
-            throw PokerException::providerUnavailable();
-        }
-    }
-
-    private function rejectSettlement(string $gameId, string $reason): void
-    {
-        $pending = $this->settlements[$gameId] ?? null;
-        if ($pending === null) {
-            return;
-        }
-        unset($this->settlements[$gameId]);
-        Timer::clear($pending['timer']);
-        ($pending['callback'])($reason);
-    }
-
-    private function externalGameId(Game $game): string
-    {
-        // Live WE settlement parsing requires a millisecond timestamp followed by a
-        // numeric identifier before the underscore (verified by historical replay).
-        // PROTOCOL.md documents only uniqueness; keep this quirk inside the adapter.
-        $timestamp = CarbonImmutable::parse($game->created_at, 'UTC')->getTimestampMs();
-
-        return $timestamp.$game->id.'_'.$game->uuid;
-    }
-
-    private function internalGameId(string $gameId): string
-    {
-        return preg_match('/^\d{14,}_([0-9a-f-]{36})$/D', $gameId, $matches) === 1
-            ? $matches[1] : $gameId;
+        return RequestActionResultVo::success($action, $response['amount'] ?? 0);
     }
 
     /** @return array<string, mixed> */
-    public function gameEvents(Game $game, bool $over = false): array
+    public function gameEvents(GameVo $game, bool $over = false): array
     {
         if ($over && $game->status->isAbort()) {
-            throw GatewayException::eventInvalid();
+            throw GameException::eventInvalid();
         }
         $events = [];
+        $hero = $game->hero();
         foreach ($game->players as $player) {
             $events[] = [
                 'eventType' => 'playerSeated',
-                'seat' => $player->seat,
-                'name' => $player->name,
+                'seat' => $player->seatNumber,
+                'name' => $player->uid,
                 'stack' => $player->stack,
             ];
         }
-        foreach ($game->events as $event) {
-            $payload = $event->payload;
-            switch ($event->type) {
-                case GameEvent::FORCE_BET:
-                    if (isset($payload['big_blind'])) {
-                        foreach ($game->players as $player) {
-                            if (($payload['ante'] ?? 0) > 0) {
-                                $events[] = [
-                                    'eventType' => 'blindPosted',
-                                    'name' => $player->name,
-                                    'blindType' => 'ANTE',
-                                    'amount' => (int) $payload['ante'],
-                                ];
-                            }
-                        }
-                        foreach ($game->players as $player) {
-                            if ($player->seat_type->isBlind()) {
-                                $events[] = [
-                                    'eventType' => 'blindPosted',
-                                    'name' => $player->name,
-                                    'blindType' => $player->seat_type->name,
-                                    'amount' => $player->blind_amount,
-                                ];
-                            }
-                        }
-                    }
-                    foreach ($payload['extra_bets'] ?? [] as $bet) {
-                        $events[] = [
-                            'eventType' => 'blindPosted',
-                            'name' => $bet['name'],
-                            'blindType' => strtoupper($bet['type']),
-                            'amount' => (int) $bet['amount'],
-                        ];
-                    }
-                    break;
-                case GameEvent::STAGE_START:
-                    $stage = StageEnum::fromNameOrFail(strtoupper($event->payload['stage']));
-                    $cards = $payload['cards'] ?? [];
-                    // Business events hold the complete board; Proto expects cards dealt this street.
-                    $cards = match ($stage) {
-                        StageEnum::TURN => array_slice($cards, 3, 1),
-                        StageEnum::RIVER => array_slice($cards, 4, 1),
-                        default => $cards,
-                    };
-                    $events[] = [
-                        'eventType' => 'stageStarted',
-                        'stage' => strtolower($stage->name),
-                        'cards' => implode(',', $cards),
-                    ];
-                    if ($stage->isPreflop()) {
-                        $events[] = [
-                            'eventType' => 'handDealt',
-                            'name' => $game->hero()->name,
-                            'cards' => implode(',', $game->hero()->cards ?? []),
-                        ];
-                    }
-                    break;
-                case GameEvent::PLAYER_ACTED:
-                    $action = ActionEnum::fromNameOrFail(strtoupper(str_replace('-', '_', $payload['action'])));
-                    $events[] = [
-                        'eventType' => 'playerActed',
-                        'name' => $payload['name'],
-                        'action' => $action->wire(),
-                        'amount' => $payload['amount'],
-                    ];
-                    break;
-                case GameEvent::KNOWN_PLAY_CARDS:
-                    $events[] = [
-                        'eventType' => 'knownPlayerCards',
-                        'name' => $payload['name'],
-                        'cards' => implode(',', $payload['cards'] ?? []),
-                    ];
-                    break;
-                case GameEvent::HAND_OVER:
-                    if ($over) {
-                        // Private known cards are not evidence that a player showed their hand.
-                        foreach ($payload['shown'] ?? [] as $shown) {
-                            $events[] = [
-                                'eventType' => 'handShown',
-                                'name' => $shown['name'],
-                                'cards' => implode(',', $shown['cards']),
-                            ];
-                        }
-                        foreach ($payload['winners'] as $winner) {
-                            $events[] = [
-                                'eventType' => 'playerWon',
-                                'name' => $winner['name'],
-                                'amount' => $winner['amount'],
-                            ];
-                        }
-                        $events[] = ['eventType' => 'gameOver'];
-                    }
-                    break;
+        foreach ($game->players as $player) {
+            if ($player->ante > 0) {
+                $events[] = [
+                    'eventType' => 'blindPosted',
+                    'name' => $player->uid,
+                    'blindType' => 'ANTE',
+                    'amount' => $player->ante,
+                ];
+            }
+        }
+        foreach ($game->players as $player) {
+            if ($player->blind > 0) {
+                $events[] = [
+                    'eventType' => 'blindPosted',
+                    'name' => $player->uid,
+                    'blindType' => $player->isSb() ? 'SB' : 'BB',
+                    'amount' => $player->blind,
+                ];
+            }
+        }
+        foreach ($game->events->sortBy('timestamp') as $event) {
+            if ($event->type->isStage()) {
+                $stage = StageEnum::fromNameOrFail(strtoupper($event->payload['stage']));
+                $cards = $event->payload['cards'] ?? [];
+                $events[] = [
+                    'eventType' => 'stageStarted',
+                    'stage' => strtolower($stage->name),
+                    'cards' => CardVo::cardsToShort($cards),
+                ];
+
+                continue;
+            }
+            if ($event->type->isDealt()) {
+                $events[] = [
+                    'eventType' => 'handDealt',
+                    'name' => $hero->uid,
+                    'cards' => CardVo::cardsToShort($event->payload['cards']),
+                ];
+
+                continue;
+            }
+            if ($event->type->isAction()) {
+                $events[] = [
+                    'eventType' => 'playerActed',
+                    'name' => $event->payload['uid'],
+                    'action' => self::enumToAction(ActionEnum::fromNameOrFail($event->payload['action'])),
+                    'amount' => $event->payload['amount'] ?? 0,
+                ];
+
+                continue;
+            }
+            if ($event->type->isShow()) {
+                $events[] = [
+                    'eventType' => 'knownPlayerCards',
+                    'name' => $event->payload['uid'],
+                    'cards' => CardVo::cardsToShort($event->payload['cards']),
+                ];
+
+                continue;
             }
         }
 
-        $button = $game->players->first(function (GamePlayer $player) use ($game) {
-            if ($game->players->count() === 2) {
-                return $player->seat_type->isSb();
+        if ($over) {
+            $lastEvent = $game->events->last();
+            if ($lastEvent === null) {
+                throw GameException::eventInvalid();
             }
-
-            return $player->seat_type->isBtn();
-        })?->seat;
+            $result = $lastEvent->payload;
+            $winnerEvents = [];
+            foreach ($result['winners'] ?? [] as $winner) {
+                $winnerEvents[] = [
+                    'eventType' => 'playerWon',
+                    'name' => $winner['uid'],
+                    'amount' => $winner['amount'],
+                ];
+            }
+            if (($result['result_order'] ?? null) === 'WINNER_FIRST') {
+                array_push($events, ...$winnerEvents);
+            }
+            foreach ($result['shown'] ?? [] as $shown) {
+                $events[] = [
+                    'eventType' => 'handShown',
+                    'name' => $shown['uid'],
+                    'cards' => CardVo::cardsToShort($shown['cards']),
+                ];
+            }
+            foreach ($result['no_hand_shown'] ?? [] as $uid) {
+                $events[] = [
+                    'eventType' => 'noHandShown',
+                    'name' => $uid,
+                ];
+            }
+            if (($result['result_order'] ?? null) !== 'WINNER_FIRST') {
+                array_push($events, ...$winnerEvents);
+            }
+            $events[] = [
+                'eventType' => 'gameOver',
+            ];
+        }
 
         return [
             'structType' => $over ? 'fullGameLog' : 'gameEvents',
             'game' => [
-                'gameId' => $this->externalGameId($game),
+                'gameId' => $game->uuid,
                 'pokerNetwork' => $this->options['network'] ?? 'WE',
                 'gameType' => 'NL',
                 'network' => $game->network->name,
-                'bigBlind' => $game->big_blind,
+                'bigBlind' => $game->bigBlind,
                 'ante' => $game->ante,
-                'currency' => 'USDT',
-                'gameDate' => (string) CarbonImmutable::parse($game->created_at, 'UTC')->getTimestampMs(),
+                'currency' => $this->options['currency'] ?? 'USDT',
+                'gameDate' => (string) $game->createdAtMs,
                 'numPlayers' => count($game->players),
-                'buttonSetToSeat' => $button,
+                'buttonSetToSeat' => $game->buttonSeatNumber,
             ],
             'events' => $events,
         ];
+    }
+
+    private static function enumToAction(ActionEnum $action): string
+    {
+        return match ($action) {
+            ActionEnum::ALL_IN => 'all-in',
+            default => strtolower($action->name),
+        };
     }
 }

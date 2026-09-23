@@ -7,7 +7,7 @@ use Hyperf\Command\Command;
 
 final class UserCreateCommand extends Command
 {
-    protected ?string $signature = 'user:create {account} {--nickname=} {--vip}';
+    protected ?string $signature = 'user:create {account} {--nickname=}';
 
     protected string $description = '创建账号';
 
@@ -40,7 +40,6 @@ final class UserCreateCommand extends Command
             'account' => $account,
             'nickname' => $nickname ?? $account,
             'password' => $password,
-            'is_vip' => $this->option('vip'),
         ]);
         $this->info('账号创建成功');
 

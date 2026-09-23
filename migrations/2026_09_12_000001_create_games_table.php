@@ -10,28 +10,30 @@ return new class extends Migration
 {
     public function up(): void
     {
-        // Poker money is stored as integer chips. Only game.vue divides by 100 for display.
-        Schema::create('games', function (Blueprint $t) {
-            $t->id();
-            $t->uuid('uuid')->unique()->comment('游戏UUID');
-            $t->foreignId('user_id')->constrained();
-            $t->enum('network', NetworkEnum::names())->comment('扑克网络');
-            $t->string('room_number', 64)->comment('房间号');
-            $t->unsignedInteger('hand_number')->comment('第几手');
-            $t->string('provider', 32)->comment('服务商');
-            $t->bigInteger('big_blind')->unsigned()->comment('大盲注');
-            $t->bigInteger('small_blind')->unsigned()->comment('小盲注');
-            $t->bigInteger('ante')->unsigned()->default(0)->comment('前注');
-            $t->enum('status', GameStatusEnum::names())->default(GameStatusEnum::OPEN->name)->comment('游戏状态');
-            $t->bigInteger('bet_amount')->unsigned()->comment('投注金额');
-            $t->bigInteger('winnings')->unsigned()->default(0)->comment('赢得奖金');
-            $t->bigInteger('profit')->nullable()->comment('游戏收益：奖金-投注');
-            $t->bigInteger('pot')->unsigned()->default(0)->comment('总池，包含所有人前注、大小盲及所有下注');
-            $t->index(['user_id', 'room_number', 'hand_number']);
-            $t->index(['user_id', 'created_at', 'id']);
-            $t->index(['user_id', 'status']);
-            $t->timestamps(6);
-            $t->unique(['user_id', 'network', 'room_number', 'hand_number'], 'games_user_network_room_hand_unique');
+        Schema::create('games', function (Blueprint $table) {
+            $table->id();
+            $table->string('uuid', 16)->unique()->comment('游戏ID');
+            $table->unsignedBigInteger('user_id')->comment('用户ID');
+            $table->enum('network', NetworkEnum::names())->comment('扑克网络');
+            $table->string('room_number', 64)->comment('房间号');
+            $table->unsignedInteger('hand_number')->comment('第几手');
+            $table->string('provider', 32)->comment('服务商');
+            $table->unsignedTinyInteger('players')->comment('玩家数量');
+            $table->enum('status', GameStatusEnum::names())->default(GameStatusEnum::OPEN->name)->comment('游戏状态');
+
+            $table->unsignedBigInteger('big_blind')->comment('大盲注');
+            $table->unsignedBigInteger('small_blind')->comment('小盲注');
+            $table->unsignedBigInteger('ante')->default(0)->comment('前注');
+            $table->unsignedBigInteger('pot')->comment('底池：主池+边池');
+            $table->unsignedBigInteger('total')->comment('本人总下注金额：包含前注+盲注+主动下注');
+            $table->unsignedBigInteger('winnings')->default(0)->comment('本人赢得奖金');
+            $table->bigInteger('profit')->comment('本人游戏收益：winnings-total');
+            $table->timestamps(6);
+
+            $table->index(['user_id', 'created_at', 'id']);
+            $table->index(['user_id', 'status']);
+            $table->index(['user_id', 'profit']);
+            $table->unique(['user_id', 'network', 'room_number', 'hand_number']);
         });
     }
 

@@ -44,5 +44,3 @@ ClassLoader::init();
 $container = require dirname(__DIR__).'/config/container.php';
 
 $container->get(ApplicationInterface::class);
-
-require_once __DIR__.'/functions.php';

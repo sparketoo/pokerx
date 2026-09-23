@@ -14,10 +14,10 @@ class EventsRequest extends QueryRequest
     public function rules(): array
     {
         return [
-            'game_id' => 'required|uuid',
+            'game_id' => 'required|string|size:16|alpha_num',
             'start' => 'nullable|date_format:Y-m-d',
             'end' => 'nullable|date_format:Y-m-d|after_or_equal:start',
-            'scope' => 'nullable|in:all,mine',
+            'scope' => 'nullable|in:all,me',
             'limit' => 'nullable|integer|min:1|max:100',
             'order' => 'nullable|in:asc,desc',
             'cursor' => 'nullable|string|max:4096',

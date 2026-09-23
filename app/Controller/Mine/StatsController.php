@@ -5,19 +5,20 @@ declare(strict_types=1);
 namespace App\Controller\Mine;
 
 use App\Controller\ApiController;
-use App\Exception\GatewayException;
+use App\Exception\GameException;
 use App\Model\Game;
 use App\Request\Mine\Stats\SummaryRequest;
 use App\Request\Mine\Stats\TrendRequest;
 use Carbon\CarbonImmutable as Date;
-use Hyperf\Database\Model\Collection;
+use Hyperf\Database\Model\Builder;
 use Psr\Http\Message\ResponseInterface as JsonResponse;
+use RuntimeException;
 
 class StatsController extends ApiController
 {
     public function summary(SummaryRequest $request): JsonResponse
     {
-        $statistics = $this->statistics($this->user($request)->id, $request->filters());
+        $statistics = $this->statistics($this->user($request)->id, $request->filters(), false);
 
         return $this->success([
             'lifetime' => $statistics['lifetime'],
@@ -28,7 +29,7 @@ class StatsController extends ApiController
 
     public function trend(TrendRequest $request): JsonResponse
     {
-        $statistics = $this->statistics($this->user($request)->id, $request->filters());
+        $statistics = $this->statistics($this->user($request)->id, $request->filters(), true);
 
         return $this->success([
             'items' => $statistics['trend'],
@@ -39,99 +40,105 @@ class StatsController extends ApiController
     /**
      * @param  array<string, mixed>  $filters
      * @return array{
-     *     lifetime: array{hands: int, wins: int, invested: float, profit: float, win_rate: float|null},
-     *     range: array{hands: int, wins: int, invested: float, profit: float, win_rate: float|null},
-     *     trend: list<array{label: string, delta: float, cumulative: float}>,
+     *     lifetime: array{hands: int, wins: int, total: int, profit: int, win_rate: float|null},
+     *     range: array{hands: int, wins: int, total: int, profit: int, win_rate: float|null},
+     *     trend: list<array{label: string, profit: int, cumulative_profit: int}>,
      *     as_of: string
      * }
      */
-    private function statistics(int $userId, array $filters): array
+    private function statistics(int $userId, array $filters, bool $includeTrend): array
     {
-        $start = (string) ($filters['start'] ?? Date::now('Asia/Shanghai')->toDateString());
-        $end = (string) ($filters['end'] ?? Date::now('Asia/Shanghai')->toDateString());
+        $today = Date::now('Asia/Shanghai')->toDateString();
+        $start = (string) ($filters['start'] ?? $today);
+        $end = (string) ($filters['end'] ?? $today);
         $startDate = Date::parse($start, 'Asia/Shanghai');
         $endDate = Date::parse($end, 'Asia/Shanghai');
         if ($startDate->diffInDays($endDate) > 3660 || $startDate > $endDate) {
-            throw GatewayException::eventInvalid();
+            throw GameException::eventInvalid();
         }
 
-        /** @var Collection<int, Game> $games */
-        $games = Game::query()
-            ->where('user_id', $userId)
-            ->whereIn('status', ['CLOSED', 'ABORT'])
-            ->with(['events' => fn ($query) => $query->whereIn('type', ['hand_over', 'game_abort'])])
-            ->orderBy('id')
-            ->get();
+        $games = Game::query()->where('user_id', $userId);
+        $rangeGames = (clone $games)
+            ->where('created_at', '>=', $startDate->utc())
+            ->where('created_at', '<', $endDate->addDay()->utc());
 
-        $lifetime = ['hands' => 0, 'wins' => 0, 'invested' => 0.0, 'profit' => 0.0];
-        $range = $lifetime;
-        $rows = [];
-        foreach ($games as $game) {
-            $endedAt = $game->events->first()?->created_at;
-            if ($endedAt === null) {
-                continue;
-            }
-
-            $profit = (float) $game->profit;
-            $day = $endedAt->copy()->timezone('Asia/Shanghai')->toDateString();
-            $lifetime['hands']++;
-            $lifetime['wins'] += (int) ($game->status->isClosed() && $profit >= 0);
-            $lifetime['invested'] += $game->bet_amount;
-            $lifetime['profit'] += $profit;
-            if ($day >= $start && $day <= $end) {
-                $range['hands']++;
-                $range['wins'] += (int) ($game->status->isClosed() && $profit >= 0);
-                $range['invested'] += $game->bet_amount;
-                $range['profit'] += $profit;
-                $rows[] = [
-                    'label' => $endedAt->copy()->timezone('Asia/Shanghai')->format('Y-m-d H:i'),
-                    'day' => $day,
-                    'profit' => $profit,
-                ];
-            }
-        }
-
-        $lifetime['win_rate'] = $lifetime['hands'] === 0 ? null : $lifetime['wins'] / $lifetime['hands'];
-        $range['win_rate'] = $range['hands'] === 0 ? null : $range['wins'] / $range['hands'];
+        $lifetime = $this->totals($games);
+        $range = $this->totals(clone $rangeGames);
 
         return [
             'lifetime' => $lifetime,
             'range' => $range,
-            'trend' => $this->trendRows($rows, $startDate, $endDate),
+            'trend' => $includeTrend ? $this->trendRows($rangeGames, $startDate, $endDate) : [],
             'as_of' => Date::now()->toIso8601String(),
         ];
     }
 
     /**
-     * @param  list<array{label: string, day: string, profit: float}>  $rows
-     * @return list<array{label: string, delta: float, cumulative: float}>
+     * @param  Builder<Game>  $query
+     * @return array{hands: int, wins: int, total: int, profit: int, win_rate: float|null}
      */
-    private function trendRows(array $rows, Date $start, Date $end): array
+    private function totals(Builder $query): array
+    {
+        $row = $query->selectRaw('COUNT(*) AS hand_count')
+            ->selectRaw('COALESCE(SUM(CASE WHEN profit > 0 THEN 1 ELSE 0 END), 0) AS win_count')
+            ->selectRaw('COALESCE(SUM(total), 0) AS total_sum')
+            ->selectRaw('COALESCE(SUM(profit), 0) AS profit_sum')
+            ->first();
+        if (! $row instanceof Game) {
+            throw new RuntimeException('Unable to aggregate game statistics');
+        }
+
+        $hands = (int) $row->getAttribute('hand_count');
+        $wins = (int) $row->getAttribute('win_count');
+
+        return [
+            'hands' => $hands,
+            'wins' => $wins,
+            'total' => (int) $row->getAttribute('total_sum'),
+            'profit' => (int) $row->getAttribute('profit_sum'),
+            'win_rate' => $hands === 0 ? null : $wins / $hands,
+        ];
+    }
+
+    /**
+     * @param  Builder<Game>  $games
+     * @return list<array{label: string, profit: int, cumulative_profit: int}>
+     */
+    private function trendRows(Builder $games, Date $start, Date $end): array
     {
         $days = (int) $start->diffInDays($end) + 1;
         $trend = [];
-        $cumulative = 0.0;
-        if ($days === 1) {
-            foreach ($rows as $row) {
-                $cumulative += $row['profit'];
-                $trend[] = ['label' => $row['label'], 'delta' => $row['profit'], 'cumulative' => $cumulative];
+        $cumulative = 0;
+        $buckets = [];
+        foreach ($games->orderBy('created_at')->orderBy('id')->cursor() as $game) {
+            $createdAt = Date::parse((string) $game->getRawOriginal('created_at'), 'UTC')
+                ->timezone('Asia/Shanghai');
+            $profit = $game->profit;
+            if ($days === 1) {
+                $cumulative += $profit;
+                $trend[] = [
+                    'label' => $createdAt->format('Y-m-d H:i'),
+                    'profit' => $profit,
+                    'cumulative_profit' => $cumulative,
+                ];
+
+                continue;
             }
 
+            $key = $days > 93 ? $createdAt->format('Y-m') : $createdAt->toDateString();
+            $buckets[$key] = ($buckets[$key] ?? 0) + $profit;
+        }
+        if ($days === 1) {
             return $trend;
         }
 
-        $buckets = [];
-        foreach ($rows as $row) {
-            $key = $days > 93 ? substr($row['day'], 0, 7) : $row['day'];
-            $buckets[$key] = ($buckets[$key] ?? 0.0) + $row['profit'];
-        }
         for ($date = $days > 93 ? $start->startOfMonth() : $start;
             $date <= $end;
             $date = $days > 93 ? $date->addMonth() : $date->addDay()) {
             $key = $days > 93 ? $date->format('Y-m') : $date->toDateString();
-            $delta = $buckets[$key] ?? 0.0;
-            $cumulative += $delta;
-            $trend[] = ['label' => $key, 'delta' => $delta, 'cumulative' => $cumulative];
+            $profit = $buckets[$key] ?? 0;
+            $cumulative += $profit;
+            $trend[] = ['label' => $key, 'profit' => $profit, 'cumulative_profit' => $cumulative];
         }
 
         return $trend;

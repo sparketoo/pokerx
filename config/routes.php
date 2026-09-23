@@ -1,13 +1,12 @@
 <?php
 
 use App\Controller\AuthController;
-use App\Controller\Mine\CreditController;
 use App\Controller\Mine\EventsController;
 use App\Controller\Mine\GamesController;
 use App\Controller\Mine\SecurityController;
 use App\Controller\Mine\StatsController;
 use App\Controller\MineController;
-use App\Game\PokerServer;
+use App\Game\GameServer;
 use Hyperf\HttpServer\Router\Router;
 
 Router::get('/api/health', fn () => ['code' => 'success', 'message' => 'ok', 'data' => ['status' => 'ok']]);
@@ -26,8 +25,6 @@ Router::get('/api/mine/games', [GamesController::class, 'index']);
 Router::get('/api/mine/games/detail', [GamesController::class, 'detail']);
 Router::get('/api/mine/games/events', [GamesController::class, 'events']);
 Router::get('/api/mine/events', [EventsController::class, 'index']);
-Router::get('/api/mine/credit', [CreditController::class, 'index']);
-Router::get('/api/mine/credit/record', [CreditController::class, 'record']);
 Router::addServer('poker', function () {
-    Router::get('/', PokerServer::class);
+    Router::get('/', GameServer::class);
 });

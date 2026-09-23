@@ -6,10 +6,9 @@ namespace App\Exception;
 
 final class FoundationException extends AppException
 {
-    /** @param  array<string, mixed>  $details */
-    public static function storageUnavailable(array $details = []): self
+    public static function statusInvalid(): self
     {
-        return self::create(__FUNCTION__)->withDetails($details)->error();
+        return self::create(__FUNCTION__);
     }
 
     public static function dataNotFound(): self

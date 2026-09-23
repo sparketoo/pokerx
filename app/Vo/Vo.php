@@ -35,7 +35,7 @@ abstract class Vo implements JsonSerializable
     private static function serializeValue(mixed $value): mixed
     {
         if ($value instanceof UnitEnum) {
-            return strtolower($value->name);
+            return $value->name;
         }
         if ($value instanceof JsonSerializable) {
             return $value->jsonSerialize();

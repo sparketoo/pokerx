@@ -4,11 +4,11 @@ declare(strict_types=1);
 
 namespace App\Controller\Mine;
 
-use App\Constants\GameEvent;
 use App\Controller\ApiController;
+use App\Enum\GameEventTypeEnum;
 use App\Exception\FoundationException;
-use App\Model\Event;
 use App\Model\Game;
+use App\Model\GameEvent;
 use App\Request\Mine\Games\DetailRequest;
 use App\Request\Mine\Games\EventsRequest;
 use App\Request\Mine\Games\IndexRequest;
@@ -49,7 +49,7 @@ class GamesController extends ApiController
     public function detail(DetailRequest $r): JsonResponse
     {
         $g = Game::query()->where('user_id', $this->user($r)->id)->where('uuid', $r->gameId())->with([
-            'players' => fn ($q) => $q->orderBy('seat'),
+            'gamePlayers' => fn ($q) => $q->orderBy('seat'),
         ])->first();
         if (! $g) {
             throw FoundationException::notFound();
@@ -66,7 +66,7 @@ class GamesController extends ApiController
         }
         $user = $this->user($r)->id;
         $f = $r->filters();
-        $q = Event::query()->where('user_id', $user);
+        $q = GameEvent::query()->where('user_id', $user);
         if (isset($f['start'])) {
             $q->where('created_at', '>=', Date::parse($f['start'], 'Asia/Shanghai')->utc());
         }
@@ -75,21 +75,18 @@ class GamesController extends ApiController
         }
 
         $q->where('game_id', $g->id);
-        if ($r->scope() === 'mine') {
-            $hero = $g->players()->where('is_hero', true)->value('name');
-            $q->where(function ($q) use ($hero) {
-                $q->where('payload->name', $hero)->orWhereIn('type', [
-                    GameEvent::HAND_START,
-                    GameEvent::FORCE_BET,
-                    GameEvent::HAND_CARD,
-                    GameEvent::REQUEST_ACTION,
-                    GameEvent::HAND_OVER,
-                    GameEvent::GAME_ABORT,
-                ]);
+        if ($r->scope() === 'me') {
+            $heroUid = $g->gamePlayers()->where('is_hero', true)->value('uid');
+            if (! is_string($heroUid)) {
+                throw FoundationException::notFound();
+            }
+            $q->where(function ($q) use ($heroUid) {
+                $q->where('type', GameEventTypeEnum::DEALT->name)
+                    ->orWhere('payload->uid', $heroUid);
             });
         }
 
-        $page = $q->orderBy('seq', $r->order())
+        $page = $q->orderBy('created_at', $r->order())->orderBy('id', $r->order())
             ->cursorPaginate($r->limit(), ['*'], 'cursor', $r->cursor());
 
         return $this->success([

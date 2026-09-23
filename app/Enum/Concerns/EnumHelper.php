@@ -22,6 +22,11 @@ trait EnumHelper
         return array_map(fn ($case) => $case->name, self::cases());
     }
 
+    public static function has(string $name): bool
+    {
+        return in_array($name, self::names());
+    }
+
     public static function implode(string $separator = ','): string
     {
         return implode($separator, self::names());

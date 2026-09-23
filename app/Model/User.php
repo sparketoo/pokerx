@@ -21,8 +21,6 @@ use function App\Support\di;
  * @property string $language
  * @property UserStatusEnum $status
  * @property ?string $two_factor_secret
- * @property bool $is_vip
- * @property int $credit_balance
  */
 class User extends Model
 {
@@ -31,7 +29,6 @@ class User extends Model
 
     /** @var array<string, string> */
     protected array $casts = [
-        'is_vip' => 'boolean',
         'status' => UserStatusEnum::class,
     ];
 

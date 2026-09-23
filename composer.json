@@ -89,7 +89,7 @@
             "rm -rf runtime/container"
         ],
         "test": "XDEBUG_MODE=off php vendor/bin/pest --test-directory=test",
-        "pint": "pint",
+        "format": "pint",
         "phpstan": "phpstan analyse --memory-limit 300M",
         "lint": [
             "vendor/bin/pint --test",

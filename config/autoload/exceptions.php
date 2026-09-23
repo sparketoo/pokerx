@@ -1,5 +1,5 @@
 <?php
 
-use App\Exception\Handler\AppExceptionHandler;
+use App\Exception\AppExceptionHandler;
 
 return ['handler' => ['http' => [AppExceptionHandler::class]]];

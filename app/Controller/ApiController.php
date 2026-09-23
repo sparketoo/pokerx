@@ -49,7 +49,7 @@ abstract class ApiController extends AbstractController
     private function normalize(mixed $v): mixed
     {
         if ($v instanceof UnitEnum) {
-            return strtolower($v->name);
+            return $v->name;
         }
         if ($v instanceof Model) {
             $out = [];
@@ -111,7 +111,6 @@ abstract class ApiController extends AbstractController
     protected function profile(User $u): array
     {
         return [
-            'is_vip' => $u->is_vip,
             'id' => (string) $u->id,
             'account' => $u->account,
             'nickname' => $u->nickname,

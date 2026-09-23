@@ -4,37 +4,37 @@ declare(strict_types=1);
 
 namespace App\Model;
 
-use App\Enum\SeatTypeEnum;
 use Carbon\Carbon;
 use Hyperf\Database\Model\Relations\BelongsTo;
 
 /**
- * @property int $id
- * @property Carbon $created_at
- * @property Carbon $updated_at
- * @property int $game_id
- * @property int $seat
- * @property string $name
- * @property bool $is_hero
- * @property int $stack 初始筹码
- * @property SeatTypeEnum $seat_type 座位类型
- * @property ?int $blind_amount 盲注
- * @property int $bet_amount 累计投注
- * @property list<string>|null $cards 已知手牌
+ * @property int $id 游戏玩家记录ID
+ * @property Carbon $created_at 创建时间
+ * @property Carbon $updated_at 更新时间
+ * @property int $game_id 游戏ID
+ * @property int $seat 座位号
+ * @property string $name 玩家名称
+ * @property bool $is_hero 是否本人
+ * @property int $stack 初始总筹码
+ * @property int $ante 前注
+ * @property ?int $blind 盲注：大盲或小盲
+ * @property int $bet 主动下注金额
+ * @property int $total 累计投注：主动下注+前注+盲注
+ * @property ?string $cards 已知手牌
+ * @property Game $game 所属游戏
  */
 class GamePlayer extends Model
 {
-    /**
-     * @return array<string, string>
-     */
     /** @var array<string, string> */
     protected array $casts = [
-        'seat_type' => SeatTypeEnum::class,
-        'cards' => 'array',
+        'seat' => 'integer',
+        'cards' => 'string',
         'is_hero' => 'boolean',
         'stack' => 'integer',
-        'blind_amount' => 'integer',
-        'bet_amount' => 'integer',
+        'ante' => 'integer',
+        'blind' => 'integer',
+        'bet' => 'integer',
+        'total' => 'integer',
     ];
 
     /** @return BelongsTo<Game, static> */

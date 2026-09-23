@@ -4,22 +4,25 @@ declare(strict_types=1);
 
 namespace App\Game\Providers;
 
-use App\Model\Game;
+use App\Vo\Game\GameEventVo;
+use App\Vo\Game\GameVo;
 use Closure;
 
 interface ProviderInterface
 {
-    public function start(Game $game): void;
+    public function start(GameVo $game): void;
 
-    public function stage(Game $game): void;
+    public function dealt(GameEventVo $event): void;
 
-    public function playerActed(Game $game): void;
+    public function stage(GameEventVo $event): void;
 
-    public function knownPlayerCards(Game $game): void;
+    public function action(GameEventVo $event): void;
 
-    public function requestAction(Game $game, Closure $callback): void;
+    public function show(GameEventVo $event): void;
 
-    public function abort(Game $game): void;
+    public function requestAction(GameVo $game, Closure $callback): void;
 
-    public function over(Game $game, ?Closure $onError = null): void;
+    public function abort(GameEventVo $event): void;
+
+    public function over(GameEventVo $event): void;
 }

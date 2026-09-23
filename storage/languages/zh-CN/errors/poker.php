@@ -3,7 +3,6 @@
 return [
     'handNotStarted' => '牌局不存在或无权访问',
     'handClosed' => '牌局已经结束',
-    'insufficientPoints' => '积分不足',
     'solveInProgress' => '正在求解中',
     'solveTimeout' => '求解超时',
     'solveStale' => '牌局状态已变化，建议失效',

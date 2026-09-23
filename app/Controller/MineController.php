@@ -13,11 +13,7 @@ class MineController extends ApiController
 {
     public function index(Request $r): JsonResponse
     {
-        $user = $this->user($r);
-
-        return $this->success($this->profile($user) + [
-            'credits' => $user->credit_balance,
-        ]);
+        return $this->success($this->profile($this->user($r)));
     }
 
     public function updateNickname(UpdateNicknameRequest $r): JsonResponse

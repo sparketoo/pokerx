@@ -13,7 +13,7 @@ class DetailRequest extends QueryRequest
      */
     public function rules(): array
     {
-        return ['game_id' => 'required|uuid'];
+        return ['game_id' => 'required|string|size:16|alpha_num'];
     }
 
     public function gameId(): string

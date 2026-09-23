@@ -4,10 +4,11 @@ declare(strict_types=1);
 
 namespace App\Game\Providers;
 
-use App\Constants\GameEvent;
 use App\Enum\ActionEnum;
-use App\Exception\PokerException;
-use App\Model\Game;
+use App\Enum\StageEnum;
+use App\Exception\GameException;
+use App\Vo\Game\GameEventVo;
+use App\Vo\Game\GameVo;
 use App\Vo\Game\RequestActionResultVo;
 use Closure;
 use Swoole\Timer;
@@ -19,18 +20,18 @@ final class MockProvider extends BaseProvider
     /** @var array<string, int> */
     private array $timers = [];
 
-    public function requestAction(Game $game, Closure $callback): void
+    public function requestAction(GameVo $game, Closure $callback): void
     {
         if (isset($this->timers[$game->uuid])) {
-            $callback(RequestActionResultVo::failure(PokerException::solveInProgress()));
+            $callback(RequestActionResultVo::failure(GameException::requestActionInProgress()));
 
             return;
         }
-        $ms = random_int(100, max(100, $this->delayMs));
+        $ms = max(1, $this->delayMs);
         $this->timers[$game->uuid] = Timer::after($ms, function () use ($game, $callback) {
             unset($this->timers[$game->uuid]);
             if ($this->failure) {
-                $callback(RequestActionResultVo::failure(PokerException::providerRejected(), '模拟供应方失败'));
+                $callback(RequestActionResultVo::failure(GameException::providerFailed('testing')));
 
                 return;
             }
@@ -38,87 +39,77 @@ final class MockProvider extends BaseProvider
         });
     }
 
-    public function abort(Game $game): void
+    public function abort(GameEventVo $event): void
     {
-        $this->stage($game);
+        $this->stage($event);
     }
 
-    public function stage(Game $game): void
+    public function over(GameEventVo $event): void
     {
-        $timer = $this->timers[$game->uuid] ?? null;
+        $this->stage($event);
+    }
+
+    public function stage(GameEventVo $event): void
+    {
+        $timer = $this->timers[$event->game->uuid] ?? null;
         if ($timer === null) {
             return;
         }
 
         Timer::clear($timer);
-        unset($this->timers[$game->uuid]);
+        unset($this->timers[$event->game->uuid]);
     }
 
-    private function actionFor(Game $game): RequestActionResultVo
+    private function actionFor(GameVo $game): RequestActionResultVo
     {
         $roundBets = [];
         $remainingStacks = [];
         foreach ($game->players as $player) {
-            $ante = min($player->stack, $game->ante);
-            $blind = min($player->stack - $ante, $player->blind_amount ?? 0);
-            $roundBets[$player->name] = $blind;
-            $remainingStacks[$player->name] = $player->stack - $ante - $blind;
+            $ante = min($player->stack, $player->ante);
+            $blind = min($player->stack - $ante, $player->blind);
+            $roundBets[$player->uid] = $blind;
+            $remainingStacks[$player->uid] = $player->stack - $ante - $blind;
         }
 
-        foreach ($game->events->sortBy('seq') as $event) {
-            if ($event->type === GameEvent::STAGE_START) {
-                if (($event->payload['stage'] ?? null) !== 'preflop') {
+        foreach ($game->events->sortBy('timestamp') as $event) {
+            if ($event->type->isStage()) {
+                if (StageEnum::fromName($event->payload['stage'] ?? null) !== StageEnum::PREFLOP) {
                     $roundBets = array_fill_keys(array_keys($roundBets), 0);
                 }
 
                 continue;
             }
-            if ($event->type === GameEvent::FORCE_BET) {
-                foreach ($event->payload['extra_bets'] ?? [] as $bet) {
-                    $name = $bet['name'];
-                    if (isset($roundBets[$name])) {
-                        $paid = min((int) $bet['amount'], $remainingStacks[$name]);
-                        $roundBets[$name] = $roundBets[$name] + $paid;
-                        $remainingStacks[$name] = $remainingStacks[$name] - $paid;
-                    }
-                }
-            }
-            if ($event->type !== GameEvent::PLAYER_ACTED) {
+            if (! $event->type->isAction()) {
                 continue;
             }
 
-            $name = $event->payload['name'] ?? null;
-            $action = is_string($event->payload['action'] ?? null)
-                ? ActionEnum::fromName(strtoupper(str_replace('-', '_', $event->payload['action'])))
-                : null;
-            if (! is_string($name) || $action === null || ! isset($roundBets[$name])) {
+            $uid = $event->payload['uid'] ?? null;
+            if (! is_string($uid) || ! array_key_exists($uid, $remainingStacks)) {
+                continue;
+            }
+            $action = ActionEnum::fromName($event->payload['action'] ?? null);
+            if ($action === null || $action->isFold() || $action->isCheck()) {
                 continue;
             }
 
-            $amount = (int) ($event->payload['amount'] ?? 0);
-            $paid = match ($action) {
-                ActionEnum::FOLD, ActionEnum::CHECK => 0,
-                default => $amount,
-            };
-            $paid = min(max(0, $paid), $remainingStacks[$name]);
-            $roundBets[$name] = $roundBets[$name] + $paid;
-            $remainingStacks[$name] = $remainingStacks[$name] - $paid;
+            $amount = max(0, (int) ($event->payload['amount'] ?? 0));
+            $paid = min($amount, $remainingStacks[$uid]);
+            $roundBets[$uid] += $paid;
+            $remainingStacks[$uid] -= $paid;
         }
 
-        $hero = $game->hero();
-        $call = $this->highestRoundBet($roundBets) - $roundBets[$hero->name];
-        $remainingStack = $remainingStacks[$hero->name];
+        $heroUid = $game->hero()->uid;
+        $highestRoundBet = $roundBets === [] ? 0 : max($roundBets);
+        $call = max(0, $highestRoundBet - $roundBets[$heroUid]);
+        $remainingStack = $remainingStacks[$heroUid];
 
-        return $call == 0
-            ? RequestActionResultVo::success(ActionEnum::CHECK, 0)
-            : ($call < $remainingStack
-                ? RequestActionResultVo::success(ActionEnum::CALL, $call)
-                : RequestActionResultVo::success(ActionEnum::ALL_IN, $remainingStack));
-    }
+        if ($call === 0) {
+            return RequestActionResultVo::success(ActionEnum::CHECK, 0);
+        }
+        if ($call < $remainingStack) {
+            return RequestActionResultVo::success(ActionEnum::CALL, $call);
+        }
 
-    /** @param array<string, int> $roundBets */
-    private function highestRoundBet(array $roundBets): int
-    {
-        return $roundBets === [] ? 0 : max($roundBets);
+        return RequestActionResultVo::success(ActionEnum::ALL_IN, $remainingStack);
     }
 }
