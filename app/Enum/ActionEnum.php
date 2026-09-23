@@ -47,9 +47,9 @@ enum ActionEnum
         return $this->is(self::ALL_IN);
     }
 
-    /** Wire representation used by the WebSocket client and Proto provider. */
+    /** Wire representation used by the GameServer protocol. */
     public function wire(): string
     {
-        return strtolower(str_replace('_', '-', $this->name));
+        return $this->name;
     }
 }

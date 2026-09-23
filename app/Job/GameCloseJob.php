@@ -8,6 +8,7 @@ use App\Enum\GameStatusEnum;
 use App\Exception\GameException;
 use App\Service\GameService;
 use Hyperf\AsyncQueue\Job;
+
 use function App\Support\di;
 
 /**
@@ -26,7 +27,9 @@ class GameCloseJob extends Job
             return;
         }
 
-        $game->status = GameStatusEnum::CLOSED;
+        if ($game->status->isOpen()) {
+            $game->status = GameStatusEnum::CLOSED;
+        }
         di(GameService::class)->store($game);
     }
 }

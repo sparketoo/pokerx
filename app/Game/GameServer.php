@@ -28,11 +28,13 @@ use Psr\Log\LoggerInterface;
 use Swoole\Coroutine;
 use Throwable;
 
+use function Hyperf\Translation\__;
+
 final class GameServer implements OnCloseInterface, OnMessageInterface, OnOpenInterface
 {
     public const string TYPE_PING = 'PING';
 
-    public const string TYPE_PONG = 'PING';
+    public const string TYPE_PONG = 'PONG';
 
     public const string TYPE_REQUEST_ACTION = 'REQUEST_ACTION';
 
@@ -85,25 +87,28 @@ final class GameServer implements OnCloseInterface, OnMessageInterface, OnOpenIn
         $id = null;
         $this->logger->debug('Poker Server Message', ['fd' => $fd, 'data' => $frame->data]);
         try {
-            $this->connection($fd);
+            $connection = $this->connection($fd);
 
             $message = json_decode($frame->data, true, 64, JSON_THROW_ON_ERROR);
             if (! is_array($message) || empty($message['type']) || empty($message['id'])) {
                 throw GameException::eventInvalid();
             }
 
-            if (empty($message['timestamp']) || $message['timestamp'] < microtime(true) * 1000 - 10000) {
+            $id = $message['id'];
+            if (! is_int($message['timestamp'] ?? null)
+                || $message['timestamp'] <= 0
+                || $message['timestamp'] < microtime(true) * 1000 - 10000
+                || ($connection->lastMessageTimestamp !== null && $message['timestamp'] < $connection->lastMessageTimestamp)) {
                 throw GameException::eventInvalid();
             }
 
-            $id = $message['id'];
+            $connection->lastMessageTimestamp = $message['timestamp'];
             if ($message['type'] === self::TYPE_PING) {
                 $this->reply($fd, self::TYPE_PONG, [], $id);
 
                 return;
             }
 
-            $connection = $this->connection($fd);
             $message = new GameServerMessageVo(
                 $fd,
                 $connection->user,
@@ -168,14 +173,18 @@ final class GameServer implements OnCloseInterface, OnMessageInterface, OnOpenIn
             'small_blind' => ['required', 'integer', 'min:0'],
             'network' => ['required', 'string', 'in:'.NetworkEnum::implode()],
             'button_seat_number' => ['required', 'integer', 'min:1', 'max:10'],
-            'players' => ['required', 'array', 'list', 'min:1'],
+            'players' => ['required', 'array', 'list', 'min:2'],
             'players.*' => ['required', 'array'],
-            'players.*.seat' => ['required', 'integer', 'min:1', 'max:9', 'distinct'],
+            'players.*.seat' => ['required', 'integer', 'min:1', 'max:10', 'distinct'],
             'players.*.uid' => ['required', 'string', 'max:64', 'distinct'],
             'players.*.name' => ['string', 'max:64'],
             'players.*.hero' => ['required', 'boolean'],
             'players.*.stack' => ['required', 'integer:strict', 'min:0', 'max:'.PHP_INT_MAX],
         ])->validate();
+
+        if (! in_array(true, array_column($payload['players'], 'hero'), true)) {
+            throw ValidationException::withMessages(['players' => __('errors/game.heroNotFound')]);
+        }
 
         $game = $this->gameService->create(
             $message->user->getKey(),

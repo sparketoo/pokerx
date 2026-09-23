@@ -53,7 +53,7 @@ final class GameServerRequestActionTest extends DatabaseTestCase
         };
         $redis = new FakeProtoHttpRedis;
         $game = new GameVo(1, '1234567890abcdef', NetworkEnum::WE, 'room', 1, 100, 50, 0, [
-            ['uid' => 'hero', 'seat' => 1, 'stack' => 1000, 'hero' => true],
+            ['uid' => 'hero', 'seat' => 1, 'stack' => 60, 'hero' => true],
             ['uid' => 'villain', 'seat' => 2, 'stack' => 1000, 'hero' => false],
         ], 1);
         $redis->setex('game:'.$game->uuid, 3600, serialize($game));
@@ -91,8 +91,8 @@ final class GameServerRequestActionTest extends DatabaseTestCase
         self::assertSame('client-1', $sender->messages[0]['reply_to']);
         self::assertSame([
             'game_uuid' => $game->uuid,
-            'action' => 'call',
-            'amount' => 50,
+            'action' => 'ALL_IN',
+            'amount' => 10,
         ], $sender->messages[0]['payload']);
     }
 
@@ -174,15 +174,19 @@ final class GameServerRequestActionTest extends DatabaseTestCase
                 'button_seat_number' => 1,
                 'players' => [
                     ['seat' => 1, 'uid' => 'hero', 'name' => 'Hero', 'stack' => 1000, 'hero' => true],
-                    ['seat' => 2, 'uid' => 'villain', 'name' => 'Villain', 'stack' => 1000, 'hero' => false],
+                    ['seat' => 10, 'uid' => 'villain', 'name' => 'Villain', 'stack' => 1000, 'hero' => false],
                 ],
             ];
 
-            $ping = $send('PING');
-            self::assertSame('PING', $ping['type']);
-            self::assertSame([], $ping['payload']);
             $invalidStart = $send('START', ['room_number' => 'table-42']);
             self::assertSame('event_invalid', $invalidStart['payload']['code'], json_encode($invalidStart, JSON_THROW_ON_ERROR));
+            $onePlayer = $send('START', [...$start, 'players' => [$start['players'][0]]]);
+            self::assertSame('event_invalid', $onePlayer['payload']['code'], json_encode($onePlayer, JSON_THROW_ON_ERROR));
+            $noHero = $send('START', [...$start, 'players' => [
+                [...$start['players'][0], 'hero' => false],
+                $start['players'][1],
+            ]]);
+            self::assertSame('event_invalid', $noHero['payload']['code'], json_encode($noHero, JSON_THROW_ON_ERROR));
             $started = $send('START', $start);
             self::assertSame('START.ACK', $started['type']);
             $gameUuid = $started['payload']['game_uuid'];
@@ -232,7 +236,7 @@ final class GameServerRequestActionTest extends DatabaseTestCase
             self::assertSame('event_invalid', $send('REQUEST_ACTION')['payload']['code']);
             $action = $send('REQUEST_ACTION', ['game_uuid' => $gameUuid]);
             self::assertSame('REQUEST_ACTION.ACK', $action['type']);
-            self::assertSame(['game_uuid' => $gameUuid, 'action' => 'check', 'amount' => 0], $action['payload']);
+            self::assertSame(['game_uuid' => $gameUuid, 'action' => 'CHECK', 'amount' => 0], $action['payload']);
             $providers->extend($providers->getDefaultProvider(), static fn (): MockProvider => new MockProvider(1, true));
             $failedAction = $send('REQUEST_ACTION', ['game_uuid' => $gameUuid]);
             self::assertSame('error', $failedAction['type']);

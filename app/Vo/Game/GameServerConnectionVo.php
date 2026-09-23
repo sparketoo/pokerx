@@ -10,6 +10,8 @@ class GameServerConnectionVo extends Vo
 {
     public readonly string $locale;
 
+    public ?int $lastMessageTimestamp = null;
+
     public function __construct(
         public readonly int $fd,
         public readonly User $user,

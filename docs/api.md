@@ -23,13 +23,13 @@ HTTP 请求可用 `X-Language: zh-CN` 或 `X-Language: en-US` 选择错误消息
 {"code":"success","message":"ok","data":{}}
 ```
 
-无数据的成功响应中 `data` 为 `null`。业务错误和参数校验错误通常仍返回 HTTP 200：
+无数据的成功响应中 `data` 为 `null`。业务错误和参数校验错误返回 HTTP 200：
 
 ```json
 {"code":"event_invalid","message":"参数无效","details":{"game_id":["..."]},"data":null}
 ```
 
-`details` 仅在有附加信息时出现。未匹配的 HTTP 路由可返回 404；未处理的服务端错误可返回 500。限流的协议错误码为 `rate_limited`，目前也以 HTTP 200 返回。客户端应同时检查 HTTP 状态码和响应体 `code`。
+`details` 仅在有附加信息时出现。未匹配的 HTTP 路由返回 404；未处理的服务端错误返回 500。限流错误码为 `rate_limited`，返回 HTTP 200。客户端应同时检查 HTTP 状态码和响应体 `code`。
 
 HTTP 的通用错误码包括 `auth_failed`、`auth_required`、`two_factor_required`、`two_factor_invalid`、`two_factor_already_enabled`、`setup_expired`、`event_invalid`、`not_found`、`rate_limited`、`server_error`。错误消息会随语言变化。
 
@@ -41,6 +41,7 @@ HTTP 的通用错误码包括 `auth_failed`、`auth_required`、`two_factor_requ
 - HTTP 时间字段是带时区偏移的 ISO 8601 字符串；GameServer `timestamp` 是 Unix 毫秒时间戳。日期筛选使用 `YYYY-MM-DD`，按 `Asia/Shanghai` 日历日计算，结束日包含整天。
 - 筹码、盲注、下注、奖金、收益均为整数；`profit = winnings - total`。客户端不要把这些整数直接解释成带小数的货币金额。
 - 列表中的 `next_cursor` 为不透明字符串或 `null`。获取下一页时原样回传，并保持其余筛选及排序参数不变。
+- 大小写区分：GameServer 的业务事件 `type`、成功响应 `type`、`network`、`stage`、行动代码及 `result_order` 使用文中列出的大写值；错误响应的 `type` 固定为小写 `error`，错误码 `code` 使用小写下划线形式。HTTP 的 `code` 及 `result`、`scope`、`order` 查询值使用文中列出的小写值。
 
 ## 2. HTTP API
 
@@ -154,7 +155,7 @@ HTTP 的通用错误码包括 `auth_failed`、`auth_required`、`two_factor_requ
 | `order` | `asc`、`desc` | `desc` | 按牌局数据库 ID 排序 |
 | `cursor` | string，最长 4096 字符 | 无 | 上一页返回的 `next_cursor` |
 
-成功 `data` 包含 `items`（牌局对象数组）、`next_cursor`（字符串或 `null`）、`pending`（目前固定为空数组）。`items` 中每个牌局对象的字段如下；部分值由牌局结束或异步保存后确定。
+成功 `data` 包含 `items`（已保存的牌局对象数组）、`next_cursor`（字符串或 `null`）、`pending`（固定为空数组）。`items` 中每个牌局对象的字段如下。
 
 | 字段 | 类型 | 含义 |
 | --- | --- | --- |
@@ -234,10 +235,11 @@ HTTP 的通用错误码包括 `auth_failed`、`auth_required`、`two_factor_requ
 | --- | --- | --- |
 | `id` | 非空字符串 | 客户端为每条消息分配；服务端用 `reply_to` 关联回应 |
 | `type` | 非空字符串 | 区分大小写；见下表 |
-| `timestamp` | Unix 毫秒时间戳 | 必填、非零；发送时不得早于服务端当前时间 10 秒以上。建议使用当前时间重新生成，不复用旧帧 |
+| `timestamp` | Unix 毫秒时间戳整数 | 必填、正整数；发送时不得早于服务端当前时间 10 秒以上；同一连接内不得小于上一条通过信封校验的消息的时间戳，相等允许 |
 | `payload` | object | 业务消息必填；`PING` 可省略 |
 
 文中的时间戳均为示意值；实际发送时每条消息都应填写**发送当时**的 Unix 毫秒时间戳。
+此顺序校验适用于 `PING` 和所有业务事件。消息通过信封校验后，即使后续业务处理返回 `error`，其时间戳也会成为该连接后续消息的比较基准；时间戳无效或倒退时返回 `event_invalid`，且不会更新基准。重新建立 WebSocket 连接后，时间戳顺序从新连接的第一条消息开始计算。
 
 服务端消息统一格式：
 
@@ -251,11 +253,11 @@ HTTP 的通用错误码包括 `auth_failed`、`auth_required`、`two_factor_requ
 }
 ```
 
-`id` 为服务端生成的消息 ID；`reply_to` 对应客户端的 `id`。牌局命令成功处理时回复 `<请求 type>.ACK`；`PING` 成功时回复 `PING`；校验或处理失败时回复 `error`，不会再回复 ACK。`REQUEST_ACTION` 的结果可能稍后返回，也可能因决策失败返回 `error`。客户端应按 `reply_to` 匹配响应。客户端消息 `id` 只用于关联响应，**不是幂等键**；重复发送业务事件可能重复计入牌局。协议没有定义自动重发或去重确认；不要把未收到回复的消息直接当作已经成功处理。
+`id` 为服务端生成的消息 ID；`reply_to` 对应客户端的 `id`。固定回复规则：除 `PING` 成功时返回 `PONG` 外，每个业务事件成功处理后都返回对应的 `<请求 type>.ACK`；校验或处理失败时返回 `error`。`REQUEST_ACTION` 的结果可能稍后返回，也可能因决策失败返回 `error`。客户端应按 `reply_to` 匹配响应。客户端消息 `id` 只用于关联响应，**不是幂等键**；重复发送业务事件可能重复计入牌局。协议没有定义自动重发或去重确认；不要把未收到回复的消息直接当作已经成功处理。
 
 | 客户端 `type` | 用途 | 成功处理时的回复 |
 | --- | --- | --- |
-| `PING` | 应用层探活 | `PING`，`payload: []`；没有 `.ACK` |
+| `PING` | 应用层探活 | `PONG`，`payload: []`；没有 `.ACK` |
 | `START` | 创建一手牌局 | `START.ACK`，返回 `game_uuid` |
 | `STAGE` | 报告阶段及本阶段新公共牌 | `STAGE.ACK`，`payload: []` |
 | `DEALT` | 报告 Hero 两张手牌 | `DEALT.ACK`，`payload: []` |
@@ -265,9 +267,9 @@ HTTP 的通用错误码包括 `auth_failed`、`auth_required`、`two_factor_requ
 | `OVER` | 正常结束并提交结果 | `OVER.ACK`，`payload: []` |
 | `ABORT` | 中止牌局 | `ABORT.ACK`，`payload: []` |
 
-上表列的是成功路径，不能据此假定每条消息都有 ACK。未识别的 `type`、无效字段、找不到牌局、牌局已结束或保存任务提交失败等情况会走 `error` 路径。连接认证失败时可能直接断开，且没有对应的 JSON ACK。
+上表列出的八个业务事件在成功处理后均有对应的 `.ACK`。未识别的 `type`、无效字段、找不到牌局、牌局已结束或保存失败等情况返回 `error`。连接认证失败时可能直接断开，且没有对应的 JSON 回复。
 
-`PING` 同样需要有效 `id` 和 `timestamp`，示例：`{"id":"p-1","type":"PING","timestamp":1790136000000}`。服务端返回 `PING`，并保留相同的 `reply_to`。WebSocket 协议层 Ping/Pong 可用于传输层保活；应用层 `PING` 用于请求一个可关联的 JSON 回复。服务端配置的空闲关闭时间为 60 秒；客户端应在低于该时长的间隔内保持连接活动。服务端单个消息包上限配置为 1 MiB。
+`PING` 同样需要有效 `id` 和 `timestamp`，示例：`{"id":"p-1","type":"PING","timestamp":1790136000000}`。服务端返回 `PONG`，并保留相同的 `reply_to`。WebSocket 协议层 Ping/Pong 可用于传输层保活；应用层 `PING` 用于请求一个可关联的 JSON 回复。服务端配置的空闲关闭时间为 60 秒；客户端应在低于该时长的间隔内保持连接活动。服务端单个消息包上限配置为 1 MiB。
 
 ### 3.2 `START`：创建牌局
 
@@ -285,19 +287,21 @@ HTTP 的通用错误码包括 `auth_failed`、`auth_required`、`two_factor_requ
 }
 ```
 
-| `payload` 字段 | 类型 | 约束 |
-| --- | --- | --- |
-| `room_number` | string | 必填，最长 64 字符 |
-| `hand_number` | integer | 必填，至少 1 |
-| `network` | string | 必填：`OK`、`WE`、`WPK`、`WPK_CLUB` |
-| `ante`、`big_blind`、`small_blind` | integer | 必填，非负整数 |
-| `button_seat_number` | integer | 必填，1–10；必须对应一名玩家的座位 |
-| `players` | array | 必填；校验至少 1 人，实际创建需要至少 2 人及一名 Hero |
-| `players[].seat` | integer | 必填，1–9，牌局内互不相同 |
-| `players[].uid` | string | 必填，最长 64 字符，牌局内互不相同 |
-| `players[].name` | string | 可选，最长 64 字符；省略时使用 `uid` |
-| `players[].hero` | boolean | 必填，标识当前用户的玩家；请仅指定一名 |
-| `players[].stack` | integer | 必填，非负整数，发送 JSON 整数而非字符串或浮点数 |
+| `payload` 字段 | 类型 | 约束 | 含义 |
+| --- | --- | --- | --- |
+| `room_number` | string | 必填，最长 64 字符 | 房间或牌桌编号 |
+| `hand_number` | integer | 必填，至少 1 | 该房间内本手牌局的编号 |
+| `network` | string | 必填：`OK`、`WE`、`WPK`、`WPK_CLUB` | 牌局所属的平台或网络 |
+| `ante` | integer | 必填，非负整数 | 每名玩家本手需支付的前注金额 |
+| `big_blind` | integer | 必填，非负整数 | 本手大盲注金额 |
+| `small_blind` | integer | 必填，非负整数 | 本手小盲注金额 |
+| `button_seat_number` | integer | 必填，1–10；必须对应一名玩家的座位 | 庄家按钮所在座位号，用于确定大小盲位置 |
+| `players` | array | 必填，至少 2 名玩家，且至少包含一名 Hero | 参与本手牌局的玩家列表 |
+| `players[].seat` | integer | 必填，1–10，牌局内互不相同 | 玩家在牌桌上的座位号 |
+| `players[].uid` | string | 必填，最长 64 字符，牌局内互不相同 | 玩家标识；后续 `ACTION`、`SHOW`、`OVER` 等事件使用此值引用玩家 |
+| `players[].name` | string | 可选，最长 64 字符；省略时使用 `uid` | 玩家显示名称 |
+| `players[].hero` | boolean | 必填；至少一名玩家为 `true`，客户端应只标记一名 | `true` 表示该玩家是当前用户（Hero），`false` 表示其他玩家 |
+| `players[].stack` | integer | 必填，非负整数；不能传字符串或浮点数 | 玩家本手开始时、支付前注和盲注之前的初始筹码 |
 
 成功回复 `payload` 为 `{"game_uuid":"abc123def456gh78"}`。后续所有牌局消息都携带这个 16 字符 ID。两人牌局中按钮位同时是小盲位；多人牌局中按钮后第一个在座玩家是小盲位，再下一个是大盲位。
 
@@ -326,11 +330,11 @@ HTTP 的通用错误码包括 `auth_failed`、`auth_required`、`two_factor_requ
 {
   "id":"server-generated-id","type":"REQUEST_ACTION.ACK",
   "timestamp":1790136001000,"reply_to":"8",
-  "payload":{"game_uuid":"abc123def456gh78","action":"call","amount":50}
+  "payload":{"game_uuid":"abc123def456gh78","action":"CALL","amount":50}
 }
 ```
 
-建议 `action` 使用小写：`fold`、`check`、`call`、`bet`、`raise`、`all-in`。`amount` 是非负整数，`fold` 和 `check` 时为 0。
+`REQUEST_ACTION.ACK` 返回的 `payload.action` 与客户端上报 `ACTION` 事件的 `payload.action` 使用相同的大写枚举值：`FOLD`、`CHECK`、`CALL`、`BET`、`RAISE`、`ALL_IN`。客户端可直接使用返回的行动代码上报实际发生的行动；响应中的 `amount` 是非负整数，`FOLD` 和 `CHECK` 时为 0。
 
 ### 3.5 `OVER` 与 `ABORT`：结束牌局
 
@@ -355,7 +359,7 @@ HTTP 的通用错误码包括 `auth_failed`、`auth_required`、`two_factor_requ
 | `winners` | 必填、非空数组；每项有 `uid`（最长 64 字符，不能重复）和 `amount`（0–9007199254740991 的 JSON 整数），表示该玩家获得的奖金 |
 | `shown` | 可选数组；每项有 `uid`（最长 64 字符）和恰好 2 张牌的 `cards` |
 | `no_hand_shown` | 可选数组；玩家 UID 字符串，最多 64 字符，不能重复 |
-| `result_order` | 可选，`WINNER_FIRST` 或 `SHOWN_FIRST`；结果顺序标记 |
+| `result_order` | 可选，`WINNER_FIRST` 或 `SHOWN_FIRST`；表示结算结果中获奖信息与亮牌信息的先后顺序：前者先列获奖信息，后者先列亮牌信息；省略时按 `SHOWN_FIRST` 处理 |
 
 提前终止时发送 `ABORT`，其 `payload` 只有必填的 `game_uuid`：
 
@@ -363,7 +367,7 @@ HTTP 的通用错误码包括 `auth_failed`、`auth_required`、`two_factor_requ
 {"id":"10","type":"ABORT","timestamp":1790136002500,"payload":{"game_uuid":"abc123def456gh78"}}
 ```
 
-`OVER.ACK` 和 `ABORT.ACK` 的 `payload` 均为空 JSON 数组 `[]`。收到 ACK 表示结束事件已处理并提交保存任务，**不保证该牌局已能立即通过 HTTP 查询到**；查询方需允许短暂的异步落库间隔。正常结束后状态为 `OVER`，终止后为 `ABORT`。已结束或已终止牌局不能继续追加事件，通常返回 `status_invalid`。没有收到结束事件的牌局在延迟保存后仍可能显示 `OPEN`。
+`OVER.ACK` 和 `ABORT.ACK` 均返回 `payload: []`；收到回复时，牌局已保存。正常结束的状态为 `OVER`，提前终止的状态为 `ABORT`。
 
 ### 3.6 WebSocket 错误
 
@@ -395,7 +399,7 @@ ACTION(对手行动)      → ACTION.ACK
 STAGE(FLOP, 三张牌)   → STAGE.ACK
 ...                  → 按实际牌局持续上报
 OVER 或 ABORT         → 对应 .ACK
-稍后 GET /api/mine/games/detail?game_id=<game_uuid> 查询保存结果
+GET /api/mine/games/detail?game_id=<game_uuid> 查询保存结果
 ```
 
 GameServer 客户端按发生顺序发送**单条** `STAGE`、`DEALT`、`ACTION`、`SHOW` 消息。连接断开后可用有效令牌重新连接并继续引用尚有效的 `game_uuid`；无需单独的会话恢复消息。实时牌局状态在创建及每次事件保存后保留 1 小时；超过该时限未更新时，后续请求可能返回 `game_uuid_not_found`，即使牌局已在 HTTP 历史记录中可见。每条新消息都应使用新的 `id` 和当前 `timestamp`。
