@@ -9,6 +9,7 @@ use App\Game\GameServer;
 use App\Model\User;
 use App\Model\UserToken;
 use App\Service\GameService;
+use App\Service\InsuranceService;
 use App\Service\UserTokenService;
 use App\Vo\Game\GameServerConnectionVo;
 use Hyperf\Context\ApplicationContext;
@@ -50,6 +51,7 @@ final class GameServerPingTest extends TestCase
             $providers,
             new UserTokenService,
             new GameService($providers, new FakeProtoHttpRedis),
+            $container->get(InsuranceService::class),
             $container->get(ValidatorFactoryInterface::class),
             $container->get(LoggerInterface::class),
         );
@@ -79,7 +81,7 @@ final class GameServerPingTest extends TestCase
         self::assertSame('event_invalid', $nonInteger['payload']['code']);
 
         $first = $send(1, 'ping-1', 'PING', $timestamp);
-        self::assertSame('PONG', $first['type']);
+        self::assertSame('PING.ACK', $first['type']);
         self::assertSame('ping-1', $first['reply_to']);
         self::assertSame([], $first['payload']);
 
@@ -96,10 +98,10 @@ final class GameServerPingTest extends TestCase
         self::assertSame('error', $olderAgain['type']);
 
         $equal = $send(1, 'ping-equal', 'PING', $timestamp + 1);
-        self::assertSame('PONG', $equal['type']);
+        self::assertSame('PING.ACK', $equal['type']);
         self::assertSame('ping-equal', $equal['reply_to']);
 
         $otherConnection = $send(2, 'ping-other', 'PING', $timestamp);
-        self::assertSame('PONG', $otherConnection['type']);
+        self::assertSame('PING.ACK', $otherConnection['type']);
     }
 }

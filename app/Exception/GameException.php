@@ -6,6 +6,11 @@ namespace App\Exception;
 
 final class GameException extends AppException
 {
+    public static function gameAlreadyExists(): self
+    {
+        return self::create(__FUNCTION__);
+    }
+
     public static function gameUuidNotFound(string $uuid): self
     {
         return self::create(__FUNCTION__)->withDetails(['uuid' => $uuid]);

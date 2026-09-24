@@ -65,11 +65,10 @@ abstract class DatabaseTestCase extends TestCase
         )');
         Db::statement("CREATE TEMPORARY TABLE games (
             id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
-            uuid VARCHAR(16) NOT NULL UNIQUE,
+            uuid CHAR(36) NOT NULL UNIQUE,
             user_id BIGINT UNSIGNED NOT NULL,
             network ENUM('OK','WE','WPK','WPK_CLUB') NOT NULL,
-            room_number VARCHAR(64) NOT NULL,
-            hand_number INT UNSIGNED NOT NULL,
+            game_key VARCHAR(32) COLLATE utf8mb4_bin NOT NULL,
             provider VARCHAR(32) NOT NULL,
             players TINYINT UNSIGNED NOT NULL,
             status ENUM('OPEN','ABORT','CLOSED','OVER') NOT NULL,
@@ -81,7 +80,8 @@ abstract class DatabaseTestCase extends TestCase
             winnings BIGINT UNSIGNED NOT NULL,
             profit BIGINT NOT NULL,
             created_at TIMESTAMP(6) NULL,
-            updated_at TIMESTAMP(6) NULL
+            updated_at TIMESTAMP(6) NULL,
+            UNIQUE KEY games_user_network_game_key_unique (user_id, network, game_key)
         )");
         Db::statement('CREATE TEMPORARY TABLE game_players (
             id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
@@ -200,8 +200,7 @@ abstract class DatabaseTestCase extends TestCase
             'uuid' => $uuid,
             'user_id' => $user->id,
             'network' => 'WE',
-            'room_number' => $uuid,
-            'hand_number' => 1,
+            'game_key' => str_replace('-', '', $uuid),
             'provider' => 'mock',
             'players' => 2,
             'status' => $status,

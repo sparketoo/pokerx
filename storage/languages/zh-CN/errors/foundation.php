@@ -1,6 +1,7 @@
 <?php
 
 return [
+    'statusInvalid' => '当前状态不允许此操作。',
     'storageUnavailable' => '存储服务暂不可用',
     'dataNotFound' => '数据不存在',
     'notFound' => '记录不存在',

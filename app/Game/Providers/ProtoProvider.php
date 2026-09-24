@@ -211,18 +211,7 @@ final class ProtoProvider extends BaseProvider
         if (($response['structType'] ?? null) !== 'playerAction' || ($response['gameId'] ?? null) !== $gameId) {
             throw GameException::providerFailed('Proto HTTP returned an unexpected action response');
         }
-        $action = is_string($response['action'] ?? null) ? match (strtolower($response['action'])) {
-            'fold' => ActionEnum::FOLD,
-            'check' => ActionEnum::CHECK,
-            'call' => ActionEnum::CALL,
-            'bet' => ActionEnum::BET,
-            'raise' => ActionEnum::RAISE,
-            'all-in' => ActionEnum::ALL_IN,
-            default => null,
-        } : null;
-        if ($action === null) {
-            throw GameException::providerFailed('Proto HTTP returned an unsupported action');
-        }
+        $action = self::actionToEnum($response['action'] ?? '');
 
         return RequestActionResultVo::success($action, $response['amount'] ?? 0);
     }
@@ -306,37 +295,28 @@ final class ProtoProvider extends BaseProvider
         }
 
         if ($over) {
-            $lastEvent = $game->events->last();
-            if ($lastEvent === null) {
-                throw GameException::eventInvalid();
+            foreach ($game->players as $player) {
+                if ($player->winnings > 0) {
+                    $events[] = [
+                        'eventType' => 'playerWon',
+                        'name' => $player->uid,
+                        'amount' => $player->winnings,
+                    ];
+                }
             }
-            $result = $lastEvent->payload;
-            $winnerEvents = [];
-            foreach ($result['winners'] ?? [] as $winner) {
-                $winnerEvents[] = [
-                    'eventType' => 'playerWon',
-                    'name' => $winner['uid'],
-                    'amount' => $winner['amount'],
-                ];
-            }
-            if (($result['result_order'] ?? null) === 'WINNER_FIRST') {
-                array_push($events, ...$winnerEvents);
-            }
-            foreach ($result['shown'] ?? [] as $shown) {
-                $events[] = [
-                    'eventType' => 'handShown',
-                    'name' => $shown['uid'],
-                    'cards' => CardVo::cardsToShort($shown['cards']),
-                ];
-            }
-            foreach ($result['no_hand_shown'] ?? [] as $uid) {
-                $events[] = [
-                    'eventType' => 'noHandShown',
-                    'name' => $uid,
-                ];
-            }
-            if (($result['result_order'] ?? null) !== 'WINNER_FIRST') {
-                array_push($events, ...$winnerEvents);
+            foreach ($game->players as $player) {
+                if ($player->cards) {
+                    $events[] = [
+                        'eventType' => 'handShown',
+                        'name' => $player->uid,
+                        'cards' => CardVo::cardsToShort($player->cards),
+                    ];
+                } else {
+                    $events[] = [
+                        'eventType' => 'noHandShown',
+                        'name' => $player->uid,
+                    ];
+                }
             }
             $events[] = [
                 'eventType' => 'gameOver',
@@ -366,6 +346,19 @@ final class ProtoProvider extends BaseProvider
         return match ($action) {
             ActionEnum::ALL_IN => 'all-in',
             default => strtolower($action->name),
+        };
+    }
+
+    private static function actionToEnum(string $action): ActionEnum
+    {
+        return match (strtolower($action)) {
+            'fold' => ActionEnum::FOLD,
+            'check' => ActionEnum::CHECK,
+            'call' => ActionEnum::CALL,
+            'bet' => ActionEnum::BET,
+            'raise' => ActionEnum::RAISE,
+            'all-in' => ActionEnum::ALL_IN,
+            default => throw GameException::providerFailed('Proto HTTP returned an unsupported action:'.$action),
         };
     }
 }

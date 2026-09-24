@@ -101,7 +101,7 @@ class GamePlayerVo extends Vo
     }
 
     /**
-     * @param  list<CardVo|string>  $cards
+     * @param  list<CardVo>  $cards
      * @return $this
      */
     public function knownCards(array $cards): static

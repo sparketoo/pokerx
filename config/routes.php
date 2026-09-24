@@ -2,6 +2,7 @@
 
 use App\Controller\AuthController;
 use App\Controller\Mine\EventsController;
+use App\Controller\Mine\GameConfigController;
 use App\Controller\Mine\GamesController;
 use App\Controller\Mine\SecurityController;
 use App\Controller\Mine\StatsController;
@@ -25,6 +26,8 @@ Router::get('/api/mine/games', [GamesController::class, 'index']);
 Router::get('/api/mine/games/detail', [GamesController::class, 'detail']);
 Router::get('/api/mine/games/events', [GamesController::class, 'events']);
 Router::get('/api/mine/events', [EventsController::class, 'index']);
+Router::get('/api/mine/game_config', [GameConfigController::class, 'index']);
+Router::post('/api/mine/game_config/save', [GameConfigController::class, 'save']);
 Router::addServer('poker', function () {
     Router::get('/', GameServer::class);
 });

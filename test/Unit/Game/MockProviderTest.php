@@ -87,9 +87,9 @@ final class MockProviderTest extends TestCase
         return $result;
     }
 
-    private function game(int $heroStack = 1000, string $uuid = 'mock-game-123456'): GameVo
+    private function game(int $heroStack = 1000, string $uuid = '22222222-2222-4222-8222-222222222222'): GameVo
     {
-        return new GameVo(1, $uuid, NetworkEnum::WE, 'room', 1, 100, 50, 10, [
+        return new GameVo(1, $uuid, NetworkEnum::WE, 'room#1', 100, 50, 10, [
             ['uid' => 'hero', 'seat' => 1, 'stack' => $heroStack, 'hero' => true],
             ['uid' => 'villain', 'seat' => 2, 'stack' => 1000, 'hero' => false],
         ], 1);

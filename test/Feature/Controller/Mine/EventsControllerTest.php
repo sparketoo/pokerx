@@ -15,8 +15,8 @@ final class EventsControllerTest extends DatabaseTestCase
         $user = $this->user();
         $other = $this->user('other@example.test');
         $this->signIn($user);
-        $gameId = $this->game($user, 'aaaabbbbcccc0001', 'OVER', 100, 200, '2026-09-23 00:00:00');
-        $otherGameId = $this->game($other, 'aaaabbbbcccc0002', 'OVER', 100, 200, '2026-09-23 00:00:00');
+        $gameId = $this->game($user, '11111111-1111-4111-8111-000000000001', 'OVER', 100, 200, '2026-09-23 00:00:00');
+        $otherGameId = $this->game($other, '11111111-1111-4111-8111-000000000002', 'OVER', 100, 200, '2026-09-23 00:00:00');
         $this->event($user, $gameId, 'SHOW', ['uid' => 'hero'], '2026-09-23 00:00:03');
         $this->event($user, $gameId, 'STAGE', ['stage' => 'FLOP'], '2026-09-23 00:00:01');
         $this->event($user, $gameId, 'ACTION', ['uid' => 'hero'], '2026-09-23 00:00:02');
@@ -27,15 +27,18 @@ final class EventsControllerTest extends DatabaseTestCase
         ]);
 
         self::assertSame(['ACTION', 'SHOW'], array_column($data['items'], 'type'));
-        self::assertSame(['aaaabbbbcccc0001', 'aaaabbbbcccc0001'], array_column(array_column($data['items'], 'game'), 'uuid'));
+        self::assertSame(['11111111-1111-4111-8111-000000000001', '11111111-1111-4111-8111-000000000001'], array_column(array_column($data['items'], 'game'), 'uuid'));
         self::assertSame('WE', $data['items'][0]['game']['network']);
+        self::assertSame('11111111111141118111000000000001', $data['items'][0]['game']['game_key']);
+        self::assertArrayNotHasKey('room_number', $data['items'][0]['game']);
+        self::assertArrayNotHasKey('hand_number', $data['items'][0]['game']);
     }
 
     public function test_index_cursor_uses_created_at_then_id_for_ties(): void
     {
         $user = $this->user();
         $this->signIn($user);
-        $gameId = $this->game($user, 'aaaabbbbcccc0001', 'OVER', 100, 200, '2026-09-23 00:00:00');
+        $gameId = $this->game($user, '11111111-1111-4111-8111-000000000001', 'OVER', 100, 200, '2026-09-23 00:00:00');
         $this->event($user, $gameId, 'STAGE', ['stage' => 'FLOP'], '2026-09-23 00:00:01');
         $this->event($user, $gameId, 'ACTION', ['uid' => 'hero'], '2026-09-23 00:00:01');
         $this->event($user, $gameId, 'SHOW', ['uid' => 'hero'], '2026-09-23 00:00:02');

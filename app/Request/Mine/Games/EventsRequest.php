@@ -14,7 +14,7 @@ class EventsRequest extends QueryRequest
     public function rules(): array
     {
         return [
-            'game_id' => 'required|string|size:16|alpha_num',
+            'game_id' => 'required|uuid',
             'start' => 'nullable|date_format:Y-m-d',
             'end' => 'nullable|date_format:Y-m-d|after_or_equal:start',
             'scope' => 'nullable|in:all,me',

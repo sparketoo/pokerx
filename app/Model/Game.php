@@ -16,8 +16,7 @@ use Hyperf\Database\Model\Relations\HasMany;
  * @property Carbon $updated_at 更新时间
  * @property string $uuid 游戏UUID
  * @property int $user_id 用户ID
- * @property string $room_number 房间号
- * @property int $hand_number 第几手
+ * @property string $game_key 平台牌局标识
  * @property string $provider 服务商
  * @property int $players 玩家数量
  * @property NetworkEnum $network 扑克网络

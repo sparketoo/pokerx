@@ -26,7 +26,7 @@ final class ProtoProviderTest extends TestCase
         $replies = [
             ['result' => true, 'sessionId' => 'session-123'],
             ['result' => true],
-            ['structType' => 'playerAction', 'gameId' => '1234567890abcdef', 'action' => 'all-In', 'amount' => 100],
+            ['structType' => 'playerAction', 'gameId' => '12345678-90ab-4cde-8f01-23456789abcd', 'action' => 'all-In', 'amount' => 100],
             ['result' => true],
         ];
         $client = new class($replies) implements ClientInterface
@@ -309,14 +309,13 @@ final class ProtoProviderTest extends TestCase
         self::assertSame(2, $client->authentications);
     }
 
-    private function game(string $uuid = '1234567890abcdef', int $userId = 1): GameVo
+    private function game(string $uuid = '12345678-90ab-4cde-8f01-23456789abcd', int $userId = 1): GameVo
     {
         return new GameVo(
             $userId,
             $uuid,
             NetworkEnum::WE,
-            'table-1',
-            1,
+            'table-1#1',
             100,
             50,
             0,

@@ -29,7 +29,7 @@ final class GameVoTest extends TestCase
 
     public function test_three_player_blinds_follow_button_with_seat_wraparound(): void
     {
-        $game = new GameVo(1, 'aaaabbbbcccc0001', NetworkEnum::WE, 'room-1', 1, 100, 50, 0, [
+        $game = new GameVo(1, '11111111-1111-4111-8111-000000000001', NetworkEnum::WE, 'room-1#1', 100, 50, 0, [
             ['uid' => 'hero', 'seat' => 2, 'stack' => 1000, 'hero' => true],
             ['uid' => 'villain-1', 'seat' => 5, 'stack' => 1000, 'hero' => false],
             ['uid' => 'villain-2', 'seat' => 8, 'stack' => 1000, 'hero' => false],
@@ -73,7 +73,7 @@ final class GameVoTest extends TestCase
     public function test_missing_hero_and_unknown_player_are_rejected(): void
     {
         try {
-            new GameVo(1, 'aaaabbbbcccc0001', NetworkEnum::WE, 'room-1', 1, 100, 50, 0, [
+            new GameVo(1, '11111111-1111-4111-8111-000000000001', NetworkEnum::WE, 'room-1#1', 100, 50, 0, [
                 ['uid' => 'a', 'seat' => 1, 'stack' => 1000, 'hero' => false],
                 ['uid' => 'b', 'seat' => 2, 'stack' => 1000, 'hero' => false],
             ], 1);

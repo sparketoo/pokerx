@@ -12,11 +12,10 @@ return new class extends Migration
     {
         Schema::create('games', function (Blueprint $table) {
             $table->id();
-            $table->string('uuid', 16)->unique()->comment('游戏ID');
+            $table->uuid('uuid')->unique()->comment('游戏UUID');
             $table->unsignedBigInteger('user_id')->comment('用户ID');
             $table->enum('network', NetworkEnum::names())->comment('扑克网络');
-            $table->string('room_number', 64)->comment('房间号');
-            $table->unsignedInteger('hand_number')->comment('第几手');
+            $table->string('game_key', 32)->collation('utf8mb4_bin')->comment('平台牌局标识');
             $table->string('provider', 32)->comment('服务商');
             $table->unsignedTinyInteger('players')->comment('玩家数量');
             $table->enum('status', GameStatusEnum::names())->default(GameStatusEnum::OPEN->name)->comment('游戏状态');
@@ -33,7 +32,7 @@ return new class extends Migration
             $table->index(['user_id', 'created_at', 'id']);
             $table->index(['user_id', 'status']);
             $table->index(['user_id', 'profit']);
-            $table->unique(['user_id', 'network', 'room_number', 'hand_number']);
+            $table->unique(['user_id', 'network', 'game_key']);
         });
     }
 

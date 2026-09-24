@@ -15,7 +15,7 @@ class EventsController extends ApiController
     {
         $query = GameEvent::query()
             ->where('game_events.user_id', $this->user($request)->id)
-            ->with('game:id,uuid,room_number,hand_number,network');
+            ->with('game:id,uuid,game_key,network');
 
         if ($keyword = $request->keyword()) {
             $query->where(function ($query) use ($keyword) {

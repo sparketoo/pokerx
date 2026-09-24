@@ -21,11 +21,30 @@ use Hyperf\AsyncQueue\Driver\DriverFactory;
 use Hyperf\DbConnection\Db;
 use Hyperf\Redis\Redis;
 use Hyperf\Stringable\Str;
+use RuntimeException;
 use Throwable;
+
 use function App\Support\di;
 
 final class GameService
 {
+    private const int GAME_TTL = 3600;
+
+    private const string REFRESH_GAME_KEY_SCRIPT = <<<'LUA'
+        local owner = redis.call('get', KEYS[1])
+        if owner and owner ~= ARGV[1] then return 0 end
+        redis.call('set', KEYS[1], ARGV[1], 'EX', tonumber(ARGV[2]) + 1)
+        redis.call('set', KEYS[2], ARGV[3], 'EX', ARGV[2])
+        return 1
+        LUA;
+
+    private const string RELEASE_GAME_KEY_SCRIPT = <<<'LUA'
+        if redis.call('get', KEYS[1]) == ARGV[1] then
+            return redis.call('del', KEYS[1])
+        end
+        return 0
+        LUA;
+
     public function __construct(
         protected readonly GameProviderManager $pokerManager,
         protected readonly Redis $redis,
@@ -38,8 +57,7 @@ final class GameService
      */
     public function create(
         int $userId,
-        string $roomNumber,
-        int $gameNumber,
+        string $gameKey,
         NetworkEnum $network,
         int $ante,
         int $bigBlind,
@@ -47,13 +65,12 @@ final class GameService
         array $players,
         int $buttonSeatNumber,
     ): GameVo {
-        $uuid = Str::random(16);
+        $uuid = Str::uuid()->toString();
         $game = new GameVo(
             $userId,
             $uuid,
             $network,
-            $roomNumber,
-            $gameNumber,
+            $gameKey,
             $bigBlind,
             $smallBlind,
             $ante,
@@ -61,10 +78,30 @@ final class GameService
             $buttonSeatNumber,
         );
 
-        $this->redis->setex('game:'.$uuid, 3600, serialize($game));
-        // 30分钟后自动CLOSED
-        $driver = di(DriverFactory::class)->get('default');
-        $driver->push(new GameCloseJob($game->uuid)->setMaxAttempts(3), 30 * 60);
+        if (Game::query()->where('user_id', $userId)
+            ->where('network', $network->name)
+            ->where('game_key', $gameKey)->exists()) {
+            throw GameException::gameAlreadyExists();
+        }
+
+        $indexKey = $this->gameKeyIndex($game);
+        if ($this->redis->set($indexKey, $uuid, ['NX', 'EX' => self::GAME_TTL + 1]) !== true) {
+            throw GameException::gameAlreadyExists();
+        }
+
+        try {
+            $this->save($game);
+            // 30分钟后自动CLOSED
+            $driver = di(DriverFactory::class)->get('default');
+            if (! $driver->push(new GameCloseJob($uuid)->setMaxAttempts(3), 30 * 60)) {
+                throw new RuntimeException('Failed to schedule game close job.');
+            }
+        } catch (Throwable $error) {
+            $this->redis->del('game:'.$uuid);
+            $this->releaseGameKey($game);
+
+            throw $error;
+        }
 
         return $game;
     }
@@ -86,12 +123,23 @@ final class GameService
 
     public function save(GameVo $game): void
     {
-        $this->redis->setex('game:'.$game->uuid, 3600, serialize($game));
+        if ($this->redis->eval(self::REFRESH_GAME_KEY_SCRIPT,
+            [$this->gameKeyIndex($game), 'game:'.$game->uuid, $game->uuid, self::GAME_TTL, serialize($game)], 2) !== 1) {
+            throw GameException::gameAlreadyExists();
+        }
     }
 
     public function delete(string $uuid): void
     {
+        try {
+            $game = $this->find($uuid);
+        } catch (GameException) {
+            $game = null;
+        }
         $this->redis->del('game:'.$uuid);
+        if ($game !== null) {
+            $this->releaseGameKey($game);
+        }
     }
 
     /**
@@ -128,8 +176,7 @@ final class GameService
                 'uuid' => $game->uuid,
                 'user_id' => $game->userId,
                 'network' => $game->network->name,
-                'room_number' => $game->roomNumber,
-                'hand_number' => $game->handNumber,
+                'game_key' => $game->gameKey,
                 'provider' => $this->pokerManager->getDefaultProvider(),
                 'players' => $game->players->count(),
                 'status' => $game->status->name,
@@ -181,5 +228,15 @@ final class GameService
 
             return $record;
         });
+    }
+
+    private function gameKeyIndex(GameVo $game): string
+    {
+        return 'game:key:'.$game->userId.':'.$game->network->name.':'.hash('sha256', $game->gameKey);
+    }
+
+    private function releaseGameKey(GameVo $game): void
+    {
+        $this->redis->eval(self::RELEASE_GAME_KEY_SCRIPT, [$this->gameKeyIndex($game), $game->uuid], 1);
     }
 }

@@ -52,8 +52,7 @@ class GameVo extends Vo
         public readonly int $userId,
         public readonly string $uuid,
         public readonly NetworkEnum $network,
-        public readonly string $roomNumber,
-        public readonly int $handNumber,
+        public readonly string $gameKey,
         public readonly int $bigBlind,
         public readonly int $smallBlind,
         public readonly int $ante,
@@ -147,7 +146,7 @@ class GameVo extends Vo
      */
     public function player(string $uid): ?GamePlayerVo
     {
-        return $this->players->where(fn (GamePlayerVo $playerVo) => $playerVo->uid === $uid)->first();
+        return $this->players->where(fn (GamePlayerVo $playerVo) => strcasecmp($playerVo->uid, $uid) === 0)->first();
     }
 
     /**
@@ -192,7 +191,23 @@ class GameVo extends Vo
         }
 
         $uid = $payload['uid'] ?? null;
-        $player = $uid ? $this->player($uid) : null;
+        $player = is_string($uid) ? $this->player($uid) : null;
+        if ($player !== null) {
+            $uid = $player->uid;
+            $payload['uid'] = $uid;
+        }
+        if ($type->isOver()) {
+            foreach ($payload['winners'] as &$winner) {
+                $winner['uid'] = $this->playerOrFail($winner['uid'])->uid;
+            }
+            unset($winner);
+            if (isset($payload['shown'])) {
+                foreach ($payload['shown'] as &$shown) {
+                    $shown['uid'] = $this->playerOrFail($shown['uid'])->uid;
+                }
+                unset($shown);
+            }
+        }
         $event = new GameEventVo(
             $this,
             $type,

@@ -55,17 +55,88 @@ final class GameServiceTest extends DatabaseTestCase
         $redis = new FakeProtoHttpRedis;
         $service = new GameService(new GameProviderManager, $redis);
 
-        $game = $service->create(1, 'room-1', 1, NetworkEnum::WE, 10, 100, 50, [
+        $game = $service->create(1, 'room-1#1', NetworkEnum::WE, 10, 100, 50, [
             ['uid' => 'hero', 'name' => 'Alice', 'seat' => 1, 'stack' => 1000, 'hero' => true],
             ['uid' => 'villain', 'name' => 'Bob', 'seat' => 2, 'stack' => 1000, 'hero' => false],
         ], 1);
 
-        self::assertMatchesRegularExpression('/^[a-zA-Z0-9]{16}$/', $game->uuid);
+        self::assertMatchesRegularExpression('/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/', $game->uuid);
+        self::assertSame('room-1#1', $game->gameKey);
         self::assertSame($game->uuid, $service->find($game->uuid)->uuid);
         self::assertCount(1, $this->queue->pushed);
         self::assertInstanceOf(GameCloseJob::class, $this->queue->pushed[0]['job']);
         self::assertSame($game->uuid, $this->queue->pushed[0]['job']->uuid);
         self::assertSame(1800, $this->queue->pushed[0]['delay']);
+    }
+
+    public function test_create_rejects_a_game_key_already_active_in_redis(): void
+    {
+        $redis = new FakeProtoHttpRedis;
+        $service = new GameService(new GameProviderManager, $redis);
+        $players = [
+            ['uid' => 'hero', 'name' => 'Alice', 'seat' => 1, 'stack' => 1000, 'hero' => true],
+            ['uid' => 'villain', 'name' => 'Bob', 'seat' => 2, 'stack' => 1000, 'hero' => false],
+        ];
+
+        $game = $service->create(1, 'table-42#1', NetworkEnum::WE, 0, 100, 50, $players, 1);
+
+        try {
+            (new GameService(new GameProviderManager, $redis))->create(1, 'table-42#1', NetworkEnum::WE, 0, 100, 50, $players, 1);
+            self::fail('A second START must not create another live game');
+        } catch (GameException $error) {
+            self::assertSame('game_already_exists', $error->getErrorCode());
+        }
+        self::assertSame($game->uuid, $service->find($game->uuid)->uuid);
+        $otherUser = $service->create(2, 'table-42#1', NetworkEnum::WE, 0, 100, 50, $players, 1);
+        $otherNetwork = $service->create(1, 'table-42#1', NetworkEnum::OK, 0, 100, 50, $players, 1);
+        self::assertNotSame($game->uuid, $otherUser->uuid);
+        self::assertNotSame($game->uuid, $otherNetwork->uuid);
+        self::assertCount(3, $this->queue->pushed);
+    }
+
+    public function test_create_rejects_a_game_key_already_saved_in_database(): void
+    {
+        $redis = new FakeProtoHttpRedis;
+        $service = new GameService(new GameProviderManager, $redis);
+        $players = [
+            ['uid' => 'hero', 'name' => 'Alice', 'seat' => 1, 'stack' => 1000, 'hero' => true],
+            ['uid' => 'villain', 'name' => 'Bob', 'seat' => 2, 'stack' => 1000, 'hero' => false],
+        ];
+
+        $game = $service->create(1, 'table-42#1', NetworkEnum::WE, 0, 100, 50, $players, 1);
+        $service->store($game);
+        $redis->advance(3601);
+
+        try {
+            $service->create(1, 'table-42#1', NetworkEnum::WE, 0, 100, 50, $players, 1);
+            self::fail('A saved game must prevent another START after Redis expiry');
+        } catch (GameException $error) {
+            self::assertSame('game_already_exists', $error->getErrorCode());
+        }
+        self::assertSame(1, Db::table('games')->count());
+        self::assertCount(1, $this->queue->pushed);
+    }
+
+    public function test_live_game_cannot_be_started_again_between_index_and_snapshot_expiry(): void
+    {
+        $redis = new FakeProtoHttpRedis;
+        $redis->gameWriteDelay = 0.5;
+        $service = new GameService(new GameProviderManager, $redis);
+        $players = [
+            ['uid' => 'hero', 'name' => 'Alice', 'seat' => 1, 'stack' => 1000, 'hero' => true],
+            ['uid' => 'villain', 'name' => 'Bob', 'seat' => 2, 'stack' => 1000, 'hero' => false],
+        ];
+
+        $game = $service->create(1, 'table-42#1', NetworkEnum::WE, 0, 100, 50, $players, 1);
+        $redis->advance(3599.7);
+        self::assertSame($game->uuid, $service->find($game->uuid)->uuid);
+
+        try {
+            $service->create(1, 'table-42#1', NetworkEnum::WE, 0, 100, 50, $players, 1);
+            self::fail('A still readable game must prevent another START');
+        } catch (GameException $error) {
+            self::assertSame('game_already_exists', $error->getErrorCode());
+        }
     }
 
     public function test_save_find_and_event_preserve_the_latest_game_snapshot(): void
@@ -92,8 +163,8 @@ final class GameServiceTest extends DatabaseTestCase
         $redis = new FakeProtoHttpRedis;
         $service = new GameService(new GameProviderManager, $redis);
 
-        foreach (['aaaabbbbcccc0001', 'aaaabbbbcccc0002'] as $uuid) {
-            if ($uuid === 'aaaabbbbcccc0002') {
+        foreach (['11111111-1111-4111-8111-000000000001', '11111111-1111-4111-8111-000000000002'] as $uuid) {
+            if ($uuid === '11111111-1111-4111-8111-000000000002') {
                 $redis->setex('game:'.$uuid, 3600, 'invalid-game-data');
             }
 

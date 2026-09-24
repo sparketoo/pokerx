@@ -16,11 +16,11 @@ final class StatsControllerTest extends DatabaseTestCase
         $user = $this->user();
         $other = $this->user('other@example.test');
         $this->signIn($user);
-        $this->game($user, 'aaaabbbbcccc0001', 'CLOSED', 200, 100, '2026-09-22 15:59:59');
-        $this->game($user, 'aaaabbbbcccc0002', 'OPEN', 50, 0, '2026-09-22 16:00:00');
-        $this->game($user, 'aaaabbbbcccc0003', 'OVER', 750, 1000, '2026-09-23 04:00:00');
-        $this->game($user, 'aaaabbbbcccc0004', 'ABORT', 350, 0, '2026-09-23 15:59:59');
-        $this->game($other, 'aaaabbbbcccc0005', 'OVER', 1, 9999, '2026-09-23 04:00:00');
+        $this->game($user, '11111111-1111-4111-8111-000000000001', 'CLOSED', 200, 100, '2026-09-22 15:59:59');
+        $this->game($user, '11111111-1111-4111-8111-000000000002', 'OPEN', 50, 0, '2026-09-22 16:00:00');
+        $this->game($user, '11111111-1111-4111-8111-000000000003', 'OVER', 750, 1000, '2026-09-23 04:00:00');
+        $this->game($user, '11111111-1111-4111-8111-000000000004', 'ABORT', 350, 0, '2026-09-23 15:59:59');
+        $this->game($other, '11111111-1111-4111-8111-000000000005', 'OVER', 1, 9999, '2026-09-23 04:00:00');
 
         $data = $this->call(new StatsController, 'summary', SummaryRequest::class, [
             'start' => '2026-09-23', 'end' => '2026-09-23',
@@ -39,9 +39,9 @@ final class StatsControllerTest extends DatabaseTestCase
     {
         $user = $this->user();
         $this->signIn($user);
-        $this->game($user, 'aaaabbbbcccc0001', 'OVER', 750, 1000, '2026-09-22 16:30:00');
-        $this->game($user, 'aaaabbbbcccc0002', 'ABORT', 350, 0, '2026-09-23 04:00:00');
-        $this->game($user, 'aaaabbbbcccc0003', 'OPEN', 100, 100, '2026-09-23 04:30:00');
+        $this->game($user, '11111111-1111-4111-8111-000000000001', 'OVER', 750, 1000, '2026-09-22 16:30:00');
+        $this->game($user, '11111111-1111-4111-8111-000000000002', 'ABORT', 350, 0, '2026-09-23 04:00:00');
+        $this->game($user, '11111111-1111-4111-8111-000000000003', 'OPEN', 100, 100, '2026-09-23 04:30:00');
 
         $data = $this->call(new StatsController, 'trend', TrendRequest::class, [
             'start' => '2026-09-23', 'end' => '2026-09-23',

@@ -70,7 +70,7 @@ final class ApiContractTest extends TestCase
     {
         $container = ApplicationContext::getContainer();
         $validatorFactory = $container->get(ValidatorFactoryInterface::class);
-        $id = Str::random(16);
+        $id = Str::uuid()->toString();
 
         self::assertFalse($validatorFactory->make(
             ['game_id' => $id],
@@ -80,5 +80,14 @@ final class ApiContractTest extends TestCase
             ['game_id' => $id, 'scope' => 'me'],
             (new EventsRequest($container))->rules(),
         )->fails());
+        foreach ([$validatorFactory->make(
+            ['game_id' => 'aaaabbbbcccc0001'],
+            (new DetailRequest($container))->rules(),
+        ), $validatorFactory->make(
+            ['game_id' => 'aaaabbbbcccc0001'],
+            (new EventsRequest($container))->rules(),
+        )] as $validator) {
+            self::assertTrue($validator->fails());
+        }
     }
 }

@@ -20,23 +20,26 @@ final class GamesControllerTest extends DatabaseTestCase
         $user = $this->user();
         $other = $this->user('other@example.test');
         $this->signIn($user);
-        $this->game($user, 'aaaabbbbcccc0001', 'OVER', 100, 200, '2026-09-22 16:00:00');
-        $this->game($user, 'aaaabbbbcccc0002', 'ABORT', 150, 0, '2026-09-23 02:00:00');
-        $this->game($user, 'aaaabbbbcccc0003', 'OPEN', 50, 50, '2026-09-23 16:00:00');
-        $this->game($other, 'aaaabbbbcccc0004', 'OVER', 1, 999, '2026-09-23 02:00:00');
+        $this->game($user, '11111111-1111-4111-8111-000000000001', 'OVER', 100, 200, '2026-09-22 16:00:00');
+        $this->game($user, '11111111-1111-4111-8111-000000000002', 'ABORT', 150, 0, '2026-09-23 02:00:00');
+        $this->game($user, '11111111-1111-4111-8111-000000000003', 'OPEN', 50, 50, '2026-09-23 16:00:00');
+        $this->game($other, '11111111-1111-4111-8111-000000000004', 'OVER', 1, 999, '2026-09-23 02:00:00');
 
         $win = $this->call(new GamesController, 'index', IndexRequest::class, [
             'start' => '2026-09-23', 'end' => '2026-09-23', 'result' => 'win',
         ]);
-        self::assertSame(['aaaabbbbcccc0001'], array_column($win['items'], 'uuid'));
+        self::assertSame(['11111111-1111-4111-8111-000000000001'], array_column($win['items'], 'uuid'));
         self::assertSame('OVER', $win['items'][0]['status']);
         self::assertSame('WE', $win['items'][0]['network']);
+        self::assertSame('11111111111141118111000000000001', $win['items'][0]['game_key']);
+        self::assertArrayNotHasKey('room_number', $win['items'][0]);
+        self::assertArrayNotHasKey('hand_number', $win['items'][0]);
         self::assertSame(100, $win['items'][0]['total']);
         self::assertSame(100, $win['items'][0]['profit']);
         self::assertArrayNotHasKey('invested', $win['items'][0]);
 
         $loss = $this->call(new GamesController, 'index', IndexRequest::class, ['result' => 'loss']);
-        self::assertSame(['aaaabbbbcccc0002'], array_column($loss['items'], 'uuid'));
+        self::assertSame(['11111111-1111-4111-8111-000000000002'], array_column($loss['items'], 'uuid'));
     }
 
     public function test_index_cursor_pages_are_scoped_to_the_user(): void
@@ -44,7 +47,7 @@ final class GamesControllerTest extends DatabaseTestCase
         $user = $this->user();
         $this->signIn($user);
         foreach (range(1, 3) as $number) {
-            $this->game($user, sprintf('aaaabbbbcccc%04d', $number), 'OVER', 10, 10, '2026-09-23 00:00:00');
+            $this->game($user, sprintf('11111111-1111-4111-8111-%012d', $number), 'OVER', 10, 10, '2026-09-23 00:00:00');
         }
 
         $first = $this->call(new GamesController, 'index', IndexRequest::class, ['limit' => 2, 'order' => 'asc']);
@@ -52,8 +55,8 @@ final class GamesControllerTest extends DatabaseTestCase
             'limit' => 2, 'order' => 'asc', 'cursor' => $first['next_cursor'],
         ]);
 
-        self::assertSame(['aaaabbbbcccc0001', 'aaaabbbbcccc0002'], array_column($first['items'], 'uuid'));
-        self::assertSame(['aaaabbbbcccc0003'], array_column($second['items'], 'uuid'));
+        self::assertSame(['11111111-1111-4111-8111-000000000001', '11111111-1111-4111-8111-000000000002'], array_column($first['items'], 'uuid'));
+        self::assertSame(['11111111-1111-4111-8111-000000000003'], array_column($second['items'], 'uuid'));
         self::assertNull($second['next_cursor']);
     }
 
@@ -61,7 +64,7 @@ final class GamesControllerTest extends DatabaseTestCase
     {
         $user = $this->user();
         $this->signIn($user);
-        $id = $this->game($user, 'aaaabbbbcccc0001', 'OVER', 100, 200, '2026-09-23 00:00:00');
+        $id = $this->game($user, '11111111-1111-4111-8111-000000000001', 'OVER', 100, 200, '2026-09-23 00:00:00');
         foreach ([2 => 'villain', 1 => 'hero'] as $seat => $uid) {
             Db::table('game_players')->insert([
                 'game_id' => $id, 'seat' => $seat, 'uid' => $uid, 'name' => $uid,
@@ -70,9 +73,10 @@ final class GamesControllerTest extends DatabaseTestCase
             ]);
         }
 
-        $data = $this->call(new GamesController, 'detail', DetailRequest::class, ['game_id' => 'aaaabbbbcccc0001']);
+        $data = $this->call(new GamesController, 'detail', DetailRequest::class, ['game_id' => '11111111-1111-4111-8111-000000000001']);
 
-        self::assertSame('aaaabbbbcccc0001', $data['game']['uuid']);
+        self::assertSame('11111111-1111-4111-8111-000000000001', $data['game']['uuid']);
+        self::assertSame('11111111111141118111000000000001', $data['game']['game_key']);
         self::assertSame([1, 2], array_column($data['game']['gamePlayers'], 'seat'));
         self::assertSame([true, false], array_column($data['game']['gamePlayers'], 'is_hero'));
         self::assertFalse($data['pending']);
@@ -83,10 +87,10 @@ final class GamesControllerTest extends DatabaseTestCase
         $user = $this->user();
         $other = $this->user('other@example.test');
         $this->signIn($user);
-        $this->game($other, 'aaaabbbbcccc0001', 'OVER', 100, 200, '2026-09-23 00:00:00');
+        $this->game($other, '11111111-1111-4111-8111-000000000001', 'OVER', 100, 200, '2026-09-23 00:00:00');
 
         try {
-            $this->call(new GamesController, 'detail', DetailRequest::class, ['game_id' => 'aaaabbbbcccc0001']);
+            $this->call(new GamesController, 'detail', DetailRequest::class, ['game_id' => '11111111-1111-4111-8111-000000000001']);
             self::fail('Other users\' games must be hidden');
         } catch (FoundationException $error) {
             self::assertSame('not_found', $error->getErrorCode());
@@ -101,7 +105,7 @@ final class GamesControllerTest extends DatabaseTestCase
         $user = $this->user();
         $other = $this->user('other@example.test');
         $this->signIn($user);
-        $id = $this->game($user, 'aaaabbbbcccc0001', 'OVER', 100, 200, '2026-09-23 00:00:00');
+        $id = $this->game($user, '11111111-1111-4111-8111-000000000001', 'OVER', 100, 200, '2026-09-23 00:00:00');
         Db::table('game_players')->insert([
             'game_id' => $id, 'seat' => 1, 'uid' => 'hero', 'name' => 'Alice',
             'is_hero' => true, 'stack' => 1000, 'ante' => 0, 'blind' => 50,
@@ -115,14 +119,14 @@ final class GamesControllerTest extends DatabaseTestCase
         $this->event($other, $id, 'ACTION', ['uid' => 'hero'], '2026-09-23 00:00:04');
 
         $mine = $this->call(new GamesController, 'events', EventsRequest::class, [
-            'game_id' => 'aaaabbbbcccc0001', 'scope' => 'me', 'order' => 'asc',
+            'game_id' => '11111111-1111-4111-8111-000000000001', 'scope' => 'me', 'order' => 'asc',
         ]);
         self::assertSame(['DEALT', 'ACTION'], array_column($mine['items'], 'type'));
         $first = $this->call(new GamesController, 'events', EventsRequest::class, [
-            'game_id' => 'aaaabbbbcccc0001', 'order' => 'asc', 'limit' => 2,
+            'game_id' => '11111111-1111-4111-8111-000000000001', 'order' => 'asc', 'limit' => 2,
         ]);
         $second = $this->call(new GamesController, 'events', EventsRequest::class, [
-            'game_id' => 'aaaabbbbcccc0001', 'order' => 'asc', 'limit' => 2,
+            'game_id' => '11111111-1111-4111-8111-000000000001', 'order' => 'asc', 'limit' => 2,
             'cursor' => $first['next_cursor'],
         ]);
         self::assertSame(['STAGE', 'DEALT'], array_column($first['items'], 'type'));
