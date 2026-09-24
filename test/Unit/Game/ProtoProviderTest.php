@@ -328,6 +328,29 @@ final class ProtoProviderTest extends TestCase
         self::assertSame('stageStarted', $events[11]['eventType']);
     }
 
+    public function test_straddle_keeps_broadcast_order_and_returns_are_included_in_full_game_log_wins(): void
+    {
+        $game = $this->game();
+        $game->event(GameEventTypeEnum::STAGE, ['stage' => 'PREFLOP', 'cards' => []], 1);
+        $game->event(GameEventTypeEnum::STRADDLE_BLIND, ['uid' => 'hero-1', 'amount' => 200], 2);
+        $game->event(GameEventTypeEnum::OVER, [
+            'winners' => [['uid' => 'hero-1', 'amount' => 300]],
+            'returns' => [['uid' => 'hero-1', 'amount' => 25], ['uid' => 'villain-1', 'amount' => 7]],
+        ], 3);
+        $provider = new ProtoProvider(['url' => 'https://proto.example']);
+        $events = $provider->gameEvents($game, true)['events'];
+        $types = array_column($events, 'eventType');
+        $stage = array_search('stageStarted', $types, true);
+        self::assertSame('blindPosted', $events[$stage + 1]['eventType']);
+        self::assertSame('STRADDLE', $events[$stage + 1]['blindType']);
+        self::assertSame(200, $events[$stage + 1]['amount']);
+        $wins = array_values(array_filter($events, static fn (array $event): bool => $event['eventType'] === 'playerWon'));
+        self::assertSame([
+            ['eventType' => 'playerWon', 'name' => 'hero-1', 'amount' => 325],
+            ['eventType' => 'playerWon', 'name' => 'villain-1', 'amount' => 7],
+        ], $wins);
+    }
+
     private function game(string $uuid = '12345678-90ab-4cde-8f01-23456789abcd', int $userId = 1): GameVo
     {
         return new GameVo(

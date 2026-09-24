@@ -69,6 +69,18 @@ final class MockProviderTest extends TestCase
         self::assertSame(0, $result->amount);
     }
 
+    public function test_straddle_is_a_live_preflop_bet_for_action_advice(): void
+    {
+        $game = $this->game();
+        $game->event(GameEventTypeEnum::STAGE, ['stage' => 'PREFLOP', 'cards' => []], 1);
+        $game->event(GameEventTypeEnum::STRADDLE_BLIND, ['uid' => 'hero', 'amount' => 100], 2);
+
+        $result = $this->request(new MockProvider(1), $game);
+
+        self::assertSame(ActionEnum::CHECK, $result->action);
+        self::assertSame(0, $result->amount);
+    }
+
     public function test_duplicate_request_and_failure_are_reported(): void
     {
         $provider = new MockProvider(1, true);

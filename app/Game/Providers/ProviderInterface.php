@@ -14,6 +14,8 @@ interface ProviderInterface
 
     public function postBlind(GameEventVo $event): void;
 
+    public function straddleBlind(GameEventVo $event): void;
+
     public function dealt(GameEventVo $event): void;
 
     public function stage(GameEventVo $event): void;

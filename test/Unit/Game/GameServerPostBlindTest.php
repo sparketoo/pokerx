@@ -53,12 +53,12 @@ final class GameServerPostBlindTest extends TestCase
             1 => new GameServerConnectionVo(1, new User(['id' => 1, 'language' => 'zh-CN']), new UserToken),
         ]);
 
-        $send = static function (string $id, array $payload) use ($server, $sender): array {
+        $send = static function (string $id, array $payload, string $type = 'POST_BLIND') use ($server, $sender): array {
             $frame = new Frame;
             $frame->fd = 1;
             $frame->data = json_encode([
                 'id' => $id,
-                'type' => 'POST_BLIND',
+                'type' => $type,
                 'timestamp' => (int) floor(microtime(true) * 1000),
                 'payload' => $payload,
             ], JSON_THROW_ON_ERROR);
@@ -77,5 +77,17 @@ final class GameServerPostBlindTest extends TestCase
         self::assertSame(2, $service->find($game->uuid)->playerOrFail('other')->postBlind);
         self::assertSame('event_invalid', $send('duplicate', $payload)['payload']['code']);
         self::assertCount(1, $service->find($game->uuid)->events);
+        self::assertSame('STAGE.ACK', $send('preflop', [
+            'game_uuid' => $game->uuid, 'stage' => 'PREFLOP', 'cards' => [],
+        ], 'STAGE')['type']);
+        self::assertSame('event_invalid', $send('bad-straddle', [
+            'game_uuid' => $game->uuid, 'uid' => 'OTHER', 'amount' => '4',
+        ], 'STRADDLE_BLIND')['payload']['code']);
+        $straddle = $send('valid-straddle', [
+            'game_uuid' => $game->uuid, 'uid' => 'OTHER', 'amount' => 4,
+        ], 'STRADDLE_BLIND');
+        self::assertSame('STRADDLE_BLIND.ACK', $straddle['type']);
+        self::assertSame('valid-straddle', $straddle['reply_to']);
+        self::assertSame(4, $service->find($game->uuid)->playerOrFail('other')->straddleBlind);
     }
 }

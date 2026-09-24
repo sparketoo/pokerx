@@ -23,8 +23,14 @@ class GamePlayerVo extends Vo
      */
     public int $postBlind = 0;
 
+    /** 自愿盲注，计入翻牌前已投入。 */
+    public int $straddleBlind = 0;
+
+    /** 未被跟注而退回的下注，不计入最终底池。 */
+    public int $returned = 0;
+
     /**
-     * 主动下注总额（不含前注、大小盲和补盲）
+     * 主动下注总额（不含前注、大小盲、补盲和自愿盲注）
      */
     public int $bet;
 
@@ -71,11 +77,11 @@ class GamePlayerVo extends Vo
     }
 
     /**
-     * 获取玩家本手总注额，含前注、大小盲、补盲和主动下注。
+     * 获取玩家本手净投入：所有盲注及下注减去退回金额。
      */
     public function total(): int
     {
-        return $this->ante + $this->blind + $this->postBlind + $this->bet;
+        return $this->ante + $this->blind + $this->postBlind + $this->straddleBlind + $this->bet - $this->returned;
     }
 
     /**

@@ -225,6 +225,29 @@ final class GameServiceTest extends DatabaseTestCase
         self::assertSame('POST_BLIND', Db::table('game_events')->value('type'));
     }
 
+    public function test_store_persists_straddle_and_returned_bet_with_net_totals(): void
+    {
+        $service = new GameService(new GameProviderManager, new FakeProtoHttpRedis);
+        $game = GameVoFixture::headsUp();
+        $time = strtotime('2026-09-23 00:00:00 UTC') * 1000;
+        $game->event(GameEventTypeEnum::STAGE, ['stage' => 'PREFLOP', 'cards' => []], $time);
+        $game->event(GameEventTypeEnum::STRADDLE_BLIND, ['uid' => 'hero', 'amount' => 200], $time + 1);
+        $game->event(GameEventTypeEnum::OVER, [
+            'winners' => [['uid' => 'hero', 'amount' => 300]],
+            'returns' => [['uid' => 'hero', 'amount' => 10]],
+        ], $time + 2);
+
+        $service->store($game);
+
+        $hero = GamePlayer::query()->where('uid', 'hero')->firstOrFail();
+        self::assertSame(200, $hero->straddle_blind);
+        self::assertSame(10, $hero->returned);
+        self::assertSame(250, $hero->total);
+        self::assertSame(360, (int) Db::table('games')->value('pot'));
+        self::assertSame(50, (int) Db::table('games')->value('profit'));
+        self::assertSame(['STAGE', 'STRADDLE_BLIND', 'OVER'], Db::table('game_events')->orderBy('id')->pluck('type')->all());
+    }
+
     public function test_store_persists_the_provided_game(): void
     {
         $redis = new FakeProtoHttpRedis;

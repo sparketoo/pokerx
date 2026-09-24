@@ -259,6 +259,27 @@ final class GameServer implements OnCloseInterface, OnMessageInterface, OnOpenIn
         $this->ack($message->fd, $message->type, $message->id);
     }
 
+    /** 上报翻牌前玩家自愿下的活盲。 */
+    public function handleStraddleBlind(GameServerMessageVo $message): void
+    {
+        $payload = $this->validatorFactory->make($message->payload, [
+            'game_uuid' => ['required', 'uuid'],
+            'uid' => ['required', 'string', 'regex:/\A[A-Za-z0-9]{1,16}\z/'],
+            'amount' => ['required', 'integer:strict', 'min:1', 'max:100000000'],
+        ])->validate();
+
+        $payload['uid'] = strtolower($payload['uid']);
+        $event = $this->gameService->event(
+            $payload['game_uuid'],
+            GameEventTypeEnum::STRADDLE_BLIND,
+            $payload,
+            $message->timestamp,
+        );
+
+        $this->provider()->straddleBlind($event);
+        $this->ack($message->fd, $message->type, $message->id);
+    }
+
     public function handleDealt(GameServerMessageVo $message): void
     {
         $payload = $this->validatorFactory->make($message->payload, [
@@ -409,6 +430,10 @@ final class GameServer implements OnCloseInterface, OnMessageInterface, OnOpenIn
             'winners.*' => ['required', 'array'],
             'winners.*.uid' => ['required', 'string', 'regex:/\A[A-Za-z0-9]{1,16}\z/', 'distinct:ignore_case'],
             'winners.*.amount' => ['required', 'integer:strict', 'min:0', 'max:100000000'],
+            'returns' => ['sometimes', 'array', 'list'],
+            'returns.*' => ['required', 'array'],
+            'returns.*.uid' => ['required', 'string', 'regex:/\A[A-Za-z0-9]{1,16}\z/', 'distinct:ignore_case'],
+            'returns.*.amount' => ['required', 'integer:strict', 'min:1', 'max:100000000'],
             'shown' => ['sometimes', 'array', 'list'],
             'shown.*' => ['required', 'array'],
             'shown.*.uid' => ['required', 'string', 'regex:/\A[A-Za-z0-9]{1,16}\z/'],
@@ -420,6 +445,12 @@ final class GameServer implements OnCloseInterface, OnMessageInterface, OnOpenIn
             $winner['uid'] = strtolower($winner['uid']);
         }
         unset($winner);
+        if (isset($payload['returns'])) {
+            foreach ($payload['returns'] as &$return) {
+                $return['uid'] = strtolower($return['uid']);
+            }
+            unset($return);
+        }
         if (isset($payload['shown'])) {
             foreach ($payload['shown'] as &$shown) {
                 $shown['uid'] = strtolower($shown['uid']);

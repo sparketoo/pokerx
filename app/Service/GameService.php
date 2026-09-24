@@ -206,6 +206,8 @@ final class GameService
                     'ante' => $player->ante,
                     'blind' => $player->blind,
                     'post_blind' => $player->postBlind,
+                    'straddle_blind' => $player->straddleBlind,
+                    'returned' => $player->returned,
                     'bet' => $player->bet,
                     'total' => $player->total(),
                     'cards' => $player->cards === [] ? null : CardVo::cardsToShort($player->cards),

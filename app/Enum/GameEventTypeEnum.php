@@ -12,6 +12,8 @@ enum GameEventTypeEnum
     case START;
     // 玩家补交盲注
     case POST_BLIND;
+    // 玩家自愿下的活盲
+    case STRADDLE_BLIND;
     // 阶段开始
     case STAGE;
     // 获得手牌
@@ -33,6 +35,11 @@ enum GameEventTypeEnum
     public function isPostBlind(): bool
     {
         return $this->is(self::POST_BLIND);
+    }
+
+    public function isStraddleBlind(): bool
+    {
+        return $this->is(self::STRADDLE_BLIND);
     }
 
     public function isStage(): bool

@@ -207,7 +207,28 @@ class GameVo extends Vo
                 throw GameException::eventInvalid();
             }
         }
+        if ($type->isStraddleBlind()) {
+            // OK 可先广播 PREFLOP 再广播自愿盲注；只要求此时仍在翻牌前。
+            $amount = $payload['amount'] ?? null;
+            $player = $this->playerOrFail(is_string($uid) ? $uid : '');
+            if ($this->stage !== StageEnum::PREFLOP || ! is_int($amount) || $amount <= 0
+                || $amount > $player->stack - $player->total()) {
+                throw GameException::eventInvalid();
+            }
+        }
         if ($type->isOver()) {
+            $seen = [];
+            foreach ($payload['returns'] ?? [] as &$return) {
+                $returnPlayer = $this->playerOrFail($return['uid']);
+                $amount = $return['amount'] ?? null;
+                if (isset($seen[$returnPlayer->uid]) || ! is_int($amount) || $amount <= 0
+                    || $amount > $returnPlayer->total() + $returnPlayer->returned) {
+                    throw GameException::eventInvalid();
+                }
+                $seen[$returnPlayer->uid] = true;
+                $return['uid'] = $returnPlayer->uid;
+            }
+            unset($return);
             foreach ($payload['winners'] as &$winner) {
                 $winner['uid'] = $this->playerOrFail($winner['uid'])->uid;
             }
@@ -230,7 +251,9 @@ class GameVo extends Vo
 
         if ($type->isPostBlind()) {
             // POST 是活盲：计入本轮已投入，后续普通 ACTION 的 amount 不再包含这笔钱。
-            $player->postBlind = $payload['amount'];
+            $this->playerOrFail($uid ?? '')->postBlind = $payload['amount'];
+        } elseif ($type->isStraddleBlind()) {
+            $this->playerOrFail($uid ?? '')->straddleBlind += $payload['amount'];
         } elseif ($type->isAction()) {
             // 玩家操作
             $action = ActionEnum::fromNameOrFail($payload['action']);
@@ -250,7 +273,10 @@ class GameVo extends Vo
                 $this->cards = array_merge($this->cards, $cards);
             }
         } elseif ($type->isOver()) {
-            // 牌局结束
+            // 退回不属于奖金，从玩家净投入和最终底池中扣除。
+            foreach ($payload['returns'] ?? [] as $return) {
+                $this->playerOrFail($return['uid'])->returned += $return['amount'];
+            }
             $this->status = GameStatusEnum::OVER;
             foreach ($payload['winners'] as $winner) {
                 $player = $this->playerOrFail($winner['uid']);

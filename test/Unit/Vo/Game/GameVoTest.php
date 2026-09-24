@@ -114,6 +114,76 @@ final class GameVoTest extends TestCase
         }
     }
 
+    public function test_straddle_blind_can_follow_preflop_stage_and_counts_as_a_live_bet(): void
+    {
+        $game = GameVoFixture::headsUp();
+        $game->event(GameEventTypeEnum::STAGE, ['stage' => 'PREFLOP', 'cards' => []], 1);
+        $event = $game->event(GameEventTypeEnum::STRADDLE_BLIND, ['uid' => 'HERO', 'amount' => 200], 2);
+
+        self::assertSame('hero', $event->payload['uid']);
+        self::assertSame(200, $game->hero()->straddleBlind);
+        self::assertSame(260, $game->hero()->total());
+        self::assertSame(370, $game->pot());
+    }
+
+    public function test_over_returns_reduce_net_contributions_without_changing_winnings(): void
+    {
+        $game = GameVoFixture::headsUp();
+        $game->event(GameEventTypeEnum::ACTION, ['uid' => 'hero', 'action' => 'BET', 'amount' => 200], 1);
+        $game->event(GameEventTypeEnum::OVER, [
+            'winners' => [['uid' => 'hero', 'amount' => 210]],
+            'returns' => [['uid' => 'hero', 'amount' => 100]],
+        ], 2);
+
+        self::assertSame(100, $game->hero()->returned);
+        self::assertSame(160, $game->hero()->total());
+        self::assertSame(270, $game->pot());
+        self::assertSame(210, $game->hero()->winnings);
+    }
+
+    public function test_straddle_rejects_late_or_unfunded_amount_without_recording_an_event(): void
+    {
+        $game = GameVoFixture::headsUp();
+        $game->event(GameEventTypeEnum::STAGE, ['stage' => 'FLOP', 'cards' => ['As', 'Kh', 'Qd']], 1);
+        try {
+            $game->event(GameEventTypeEnum::STRADDLE_BLIND, ['uid' => 'hero', 'amount' => 200], 2);
+            self::fail('A straddle after the flop must be rejected');
+        } catch (GameException $error) {
+            self::assertSame('event_invalid', $error->getErrorCode());
+        }
+        self::assertCount(1, $game->events);
+
+        $short = GameVoFixture::headsUp();
+        try {
+            $short->event(GameEventTypeEnum::STRADDLE_BLIND, ['uid' => 'hero', 'amount' => 941], 1);
+            self::fail('A straddle cannot exceed the remaining stack');
+        } catch (GameException $error) {
+            self::assertSame('event_invalid', $error->getErrorCode());
+        }
+        self::assertCount(0, $short->events);
+    }
+
+    public function test_over_rejects_duplicate_or_excessive_returns_without_ending_the_hand(): void
+    {
+        foreach ([
+            [['uid' => 'hero', 'amount' => 61]],
+            [['uid' => 'hero', 'amount' => 1], ['uid' => 'HERO', 'amount' => 1]],
+        ] as $returns) {
+            $game = GameVoFixture::headsUp();
+            try {
+                $game->event(GameEventTypeEnum::OVER, [
+                    'winners' => [['uid' => 'hero', 'amount' => 100]],
+                    'returns' => $returns,
+                ], 1);
+                self::fail('Invalid returns must be rejected');
+            } catch (GameException $error) {
+                self::assertSame('event_invalid', $error->getErrorCode());
+            }
+            self::assertSame(GameStatusEnum::OPEN, $game->status);
+            self::assertCount(0, $game->events);
+        }
+    }
+
     public function test_abort_closes_the_game(): void
     {
         $game = GameVoFixture::headsUp();

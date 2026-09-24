@@ -263,6 +263,16 @@ final class ProtoProvider extends BaseProvider
 
                 continue;
             }
+            if ($event->type->isStraddleBlind()) {
+                $events[] = [
+                    'eventType' => 'blindPosted',
+                    'name' => $event->payload['uid'],
+                    'blindType' => 'STRADDLE',
+                    'amount' => $event->payload['amount'],
+                ];
+
+                continue;
+            }
             if ($event->type->isStage()) {
                 $stage = StageEnum::fromNameOrFail(strtoupper($event->payload['stage']));
                 $cards = $event->payload['cards'] ?? [];
@@ -306,11 +316,11 @@ final class ProtoProvider extends BaseProvider
 
         if ($over) {
             foreach ($game->players as $player) {
-                if ($player->winnings > 0) {
+                if ($player->winnings + $player->returned > 0) {
                     $events[] = [
                         'eventType' => 'playerWon',
                         'name' => $player->uid,
-                        'amount' => $player->winnings,
+                        'amount' => $player->winnings + $player->returned,
                     ];
                 }
             }

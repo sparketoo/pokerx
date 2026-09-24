@@ -68,8 +68,9 @@ final class MockProvider extends BaseProvider
             $ante = min($player->stack, $player->ante);
             $blind = min($player->stack - $ante, $player->blind);
             $postBlind = min($player->stack - $ante - $blind, $player->postBlind);
-            $roundBets[$player->uid] = $blind + $postBlind;
-            $remainingStacks[$player->uid] = $player->stack - $ante - $blind - $postBlind;
+            $straddle = min($player->stack - $ante - $blind - $postBlind, $player->straddleBlind);
+            $roundBets[$player->uid] = $blind + $postBlind + $straddle;
+            $remainingStacks[$player->uid] = $player->stack - $ante - $blind - $postBlind - $straddle;
         }
 
         foreach ($game->events->sortBy('timestamp') as $event) {
