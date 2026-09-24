@@ -19,7 +19,12 @@ class GamePlayerVo extends Vo
     public readonly int $blind;
 
     /**
-     * 主动下注总额（不含前注，盲注）
+     * 本手额外补交的盲注，计入翻牌前已投入。
+     */
+    public int $postBlind = 0;
+
+    /**
+     * 主动下注总额（不含前注、大小盲和补盲）
      */
     public int $bet;
 
@@ -66,11 +71,11 @@ class GamePlayerVo extends Vo
     }
 
     /**
-     * 获取玩家本手总注额，含前注和盲注
+     * 获取玩家本手总注额，含前注、大小盲、补盲和主动下注。
      */
     public function total(): int
     {
-        return $this->ante + $this->blind + $this->bet;
+        return $this->ante + $this->blind + $this->postBlind + $this->bet;
     }
 
     /**

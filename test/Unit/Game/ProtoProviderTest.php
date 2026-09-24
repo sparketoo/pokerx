@@ -309,6 +309,25 @@ final class ProtoProviderTest extends TestCase
         self::assertSame(2, $client->authentications);
     }
 
+    public function test_post_blind_is_sent_as_blind_posted_for_its_player_before_preflop(): void
+    {
+        $game = new GameVo(1, '12345678-90ab-4cde-8f01-23456789abce', NetworkEnum::OK, 'room#129', 2, 1, 2, [
+            ['uid' => 'hero', 'seat' => 1, 'stack' => 190, 'hero' => true],
+            ['uid' => 'small', 'seat' => 2, 'stack' => 190, 'hero' => false],
+            ['uid' => 'big', 'seat' => 3, 'stack' => 190, 'hero' => false],
+            ['uid' => 'other', 'seat' => 4, 'stack' => 190, 'hero' => false],
+        ], 1);
+        $game->event(GameEventTypeEnum::POST_BLIND, ['uid' => 'other', 'amount' => 2], 1);
+        $game->event(GameEventTypeEnum::STAGE, ['stage' => 'PREFLOP', 'cards' => []], 2);
+        $provider = new ProtoProvider(['url' => 'https://proto.example']);
+
+        $events = $provider->gameEvents($game)['events'];
+        self::assertSame([
+            'eventType' => 'blindPosted', 'name' => 'other', 'blindType' => 'POST', 'amount' => 2,
+        ], $events[10]);
+        self::assertSame('stageStarted', $events[11]['eventType']);
+    }
+
     private function game(string $uuid = '12345678-90ab-4cde-8f01-23456789abcd', int $userId = 1): GameVo
     {
         return new GameVo(

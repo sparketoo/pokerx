@@ -54,6 +54,21 @@ final class MockProviderTest extends TestCase
         self::assertSame(60, $result->amount);
     }
 
+    public function test_posted_blind_is_live_in_preflop_and_reduces_remaining_stack(): void
+    {
+        $game = new GameVo(1, '22222222-2222-4222-8222-222222222223', NetworkEnum::OK, 'room#129', 2, 1, 2, [
+            ['uid' => 'hero', 'seat' => 1, 'stack' => 4, 'hero' => true],
+            ['uid' => 'small', 'seat' => 2, 'stack' => 100, 'hero' => false],
+            ['uid' => 'big', 'seat' => 3, 'stack' => 100, 'hero' => false],
+        ], 1);
+        $game->event(GameEventTypeEnum::POST_BLIND, ['uid' => 'hero', 'amount' => 2], 1);
+
+        $result = $this->request(new MockProvider(1), $game);
+
+        self::assertSame(ActionEnum::CHECK, $result->action);
+        self::assertSame(0, $result->amount);
+    }
+
     public function test_duplicate_request_and_failure_are_reported(): void
     {
         $provider = new MockProvider(1, true);

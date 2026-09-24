@@ -10,6 +10,7 @@ use App\Enum\NetworkEnum;
 use App\Exception\GameException;
 use App\Game\GameProviderManager;
 use App\Job\GameCloseJob;
+use App\Model\GamePlayer;
 use App\Service\GameService;
 use Hyperf\AsyncQueue\Driver\DriverFactory;
 use Hyperf\Context\ApplicationContext;
@@ -205,6 +206,23 @@ final class GameServiceTest extends DatabaseTestCase
         self::assertSame('As,Kh', Db::table('game_players')->where('uid', 'hero')->value('cards'));
         self::assertSame(['DEALT', 'ACTION', 'OVER'], Db::table('game_events')->orderBy('id')->pluck('type')->all());
         self::assertSame('hero', json_decode(Db::table('game_events')->where('type', 'ACTION')->value('payload'), true, 512, JSON_THROW_ON_ERROR)['uid']);
+    }
+
+    public function test_store_persists_post_blind_separately_from_regular_blind(): void
+    {
+        $service = new GameService(new GameProviderManager, new FakeProtoHttpRedis);
+        $game = GameVoFixture::headsUp();
+        $game->event(GameEventTypeEnum::POST_BLIND, ['uid' => 'hero', 'amount' => 20], strtotime('2026-09-23 00:00:00 UTC') * 1000);
+
+        $service->store($game);
+
+        $hero = GamePlayer::query()->where('uid', 'hero')->firstOrFail();
+        self::assertSame(50, (int) $hero->blind);
+        self::assertSame(20, (int) $hero->post_blind);
+        self::assertSame(80, (int) $hero->total);
+        self::assertSame(190, (int) Db::table('games')->value('pot'));
+        self::assertSame(80, (int) Db::table('games')->value('total'));
+        self::assertSame('POST_BLIND', Db::table('game_events')->value('type'));
     }
 
     public function test_store_persists_the_provided_game(): void

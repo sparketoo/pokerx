@@ -236,6 +236,29 @@ final class GameServer implements OnCloseInterface, OnMessageInterface, OnOpenIn
         ]);
     }
 
+    /**
+     * 上报任意参局玩家在开局时补交的活盲。
+     */
+    public function handlePostBlind(GameServerMessageVo $message): void
+    {
+        $payload = $this->validatorFactory->make($message->payload, [
+            'game_uuid' => ['required', 'uuid'],
+            'uid' => ['required', 'string', 'regex:/\A[A-Za-z0-9]{1,16}\z/'],
+            'amount' => ['required', 'integer:strict', 'min:1', 'max:100000000'],
+        ])->validate();
+
+        $payload['uid'] = strtolower($payload['uid']);
+        $event = $this->gameService->event(
+            $payload['game_uuid'],
+            GameEventTypeEnum::POST_BLIND,
+            $payload,
+            $message->timestamp,
+        );
+
+        $this->provider()->postBlind($event);
+        $this->ack($message->fd, $message->type, $message->id);
+    }
+
     public function handleDealt(GameServerMessageVo $message): void
     {
         $payload = $this->validatorFactory->make($message->payload, [

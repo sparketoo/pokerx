@@ -253,6 +253,16 @@ final class ProtoProvider extends BaseProvider
             }
         }
         foreach ($game->events->sortBy('timestamp') as $event) {
+            if ($event->type->isPostBlind()) {
+                $events[] = [
+                    'eventType' => 'blindPosted',
+                    'name' => $event->payload['uid'],
+                    'blindType' => 'POST',
+                    'amount' => $event->payload['amount'],
+                ];
+
+                continue;
+            }
             if ($event->type->isStage()) {
                 $stage = StageEnum::fromNameOrFail(strtoupper($event->payload['stage']));
                 $cards = $event->payload['cards'] ?? [];

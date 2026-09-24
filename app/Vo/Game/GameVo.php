@@ -196,6 +196,17 @@ class GameVo extends Vo
             $uid = $player->uid;
             $payload['uid'] = $uid;
         }
+        if ($type->isPostBlind()) {
+            // 补盲必须紧跟 START；重复或迟到事件会使底池与决策服务的事件顺序失真。
+            $amount = $payload['amount'] ?? null;
+            if ($this->events->contains(fn (GameEventVo $event) => ! $event->type->isPostBlind()) || ! is_int($amount) || $amount <= 0) {
+                throw GameException::eventInvalid();
+            }
+            $player = $this->playerOrFail(is_string($uid) ? $uid : '');
+            if ($player->postBlind > 0 || $amount > $player->stack - $player->ante - $player->blind) {
+                throw GameException::eventInvalid();
+            }
+        }
         if ($type->isOver()) {
             foreach ($payload['winners'] as &$winner) {
                 $winner['uid'] = $this->playerOrFail($winner['uid'])->uid;
@@ -217,7 +228,10 @@ class GameVo extends Vo
         );
         $this->events->push($event);
 
-        if ($type->isAction()) {
+        if ($type->isPostBlind()) {
+            // POST 是活盲：计入本轮已投入，后续普通 ACTION 的 amount 不再包含这笔钱。
+            $player->postBlind = $payload['amount'];
+        } elseif ($type->isAction()) {
             // 玩家操作
             $action = ActionEnum::fromNameOrFail($payload['action']);
             $this->playerOrFail($uid ?? '')->action($action, $payload['amount'] ?? null);

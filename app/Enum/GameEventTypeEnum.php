@@ -10,6 +10,8 @@ enum GameEventTypeEnum
 
     // 游戏开始
     case START;
+    // 玩家补交盲注
+    case POST_BLIND;
     // 阶段开始
     case STAGE;
     // 获得手牌
@@ -26,6 +28,11 @@ enum GameEventTypeEnum
     public function isStart(): bool
     {
         return $this->is(self::START);
+    }
+
+    public function isPostBlind(): bool
+    {
+        return $this->is(self::POST_BLIND);
     }
 
     public function isStage(): bool

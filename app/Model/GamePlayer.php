@@ -17,9 +17,10 @@ use Hyperf\Database\Model\Relations\BelongsTo;
  * @property bool $is_hero 是否本人
  * @property int $stack 初始总筹码
  * @property int $ante 前注
- * @property ?int $blind 盲注：大盲或小盲
+ * @property ?int $blind 普通盲注：大盲或小盲
+ * @property int $post_blind 额外补交的活盲
  * @property int $bet 主动下注金额
- * @property int $total 累计投注：主动下注+前注+盲注
+ * @property int $total 累计投注：主动下注+前注+普通盲注+补盲
  * @property ?string $cards 已知手牌
  * @property Game $game 所属游戏
  */
@@ -33,6 +34,7 @@ class GamePlayer extends Model
         'stack' => 'integer',
         'ante' => 'integer',
         'blind' => 'integer',
+        'post_blind' => 'integer',
         'bet' => 'integer',
         'total' => 'integer',
     ];

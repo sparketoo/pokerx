@@ -61,6 +61,59 @@ final class GameVoTest extends TestCase
         $game->event(GameEventTypeEnum::ACTION, ['uid' => 'hero', 'action' => 'CHECK', 'amount' => 0], 6);
     }
 
+    public function test_post_blind_counts_for_any_player_and_rejects_a_duplicate(): void
+    {
+        $players = [];
+        for ($seat = 1; $seat <= 8; $seat++) {
+            $players[] = ['uid' => 'player'.$seat, 'seat' => $seat, 'stack' => 190, 'hero' => $seat === 3];
+        }
+        $game = new GameVo(1, '11111111-1111-4111-8111-000000000002', NetworkEnum::OK, 'room-129', 2, 1, 2, $players, 4);
+        self::assertSame(19, $game->pot());
+
+        $heroPost = $game->event(GameEventTypeEnum::POST_BLIND, ['uid' => 'PLAYER3', 'amount' => 2], 1);
+        self::assertSame(21, $game->pot());
+        $otherPost = $game->event(GameEventTypeEnum::POST_BLIND, ['uid' => 'player8', 'amount' => 2], 2);
+
+        self::assertSame('player3', $heroPost->payload['uid']);
+        self::assertSame('player8', $otherPost->player?->uid);
+        self::assertSame(2, $game->hero()->postBlind);
+        self::assertSame(4, $game->hero()->total());
+        self::assertSame(23, $game->pot());
+
+        try {
+            $game->event(GameEventTypeEnum::POST_BLIND, ['uid' => 'player8', 'amount' => 2], 3);
+            self::fail('A duplicate POST_BLIND must not increase the pot');
+        } catch (GameException $error) {
+            self::assertSame('event_invalid', $error->getErrorCode());
+        }
+        self::assertSame(23, $game->pot());
+        self::assertCount(2, $game->events);
+    }
+
+    public function test_post_blind_must_precede_play_and_fit_the_remaining_stack(): void
+    {
+        $game = GameVoFixture::headsUp();
+        $game->event(GameEventTypeEnum::STAGE, ['stage' => 'PREFLOP', 'cards' => []], 1);
+
+        try {
+            $game->event(GameEventTypeEnum::POST_BLIND, ['uid' => 'hero', 'amount' => 10], 2);
+            self::fail('Late POST_BLIND must be rejected');
+        } catch (GameException $error) {
+            self::assertSame('event_invalid', $error->getErrorCode());
+        }
+
+        $short = new GameVo(1, '11111111-1111-4111-8111-000000000003', NetworkEnum::WE, 'short-post', 2, 1, 2, [
+            ['uid' => 'hero', 'seat' => 1, 'stack' => 3, 'hero' => true],
+            ['uid' => 'villain', 'seat' => 2, 'stack' => 100, 'hero' => false],
+        ], 1);
+        try {
+            $short->event(GameEventTypeEnum::POST_BLIND, ['uid' => 'hero', 'amount' => 1], 1);
+            self::fail('POST_BLIND cannot exceed remaining stack');
+        } catch (GameException $error) {
+            self::assertSame('event_invalid', $error->getErrorCode());
+        }
+    }
+
     public function test_abort_closes_the_game(): void
     {
         $game = GameVoFixture::headsUp();
