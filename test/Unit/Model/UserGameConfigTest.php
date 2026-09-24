@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Tests\Unit\Models;
+namespace Tests\Unit\Model;
 
 use App\Enum\NetworkEnum;
 use App\Model\UserGameConfig;

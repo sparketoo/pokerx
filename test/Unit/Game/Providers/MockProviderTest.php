@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Tests\Unit\Game;
+namespace Tests\Unit\Game\Providers;
 
 use App\Enum\ActionEnum;
 use App\Enum\GameEventTypeEnum;
