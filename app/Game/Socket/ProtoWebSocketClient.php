@@ -45,8 +45,7 @@ final class ProtoWebSocketClient extends WebSocketClient
      * @param  null|Closure(string, int, bool): Client  $socketFactory
      */
     public function __construct(
-        int $userId,
-        string $clientId,
+        string $clientKey,
         private readonly array $options,
         private readonly Redis $redis,
         ?Closure $socketFactory = null,
@@ -54,12 +53,12 @@ final class ProtoWebSocketClient extends WebSocketClient
     ) {
         $url = (string) ($options['url'] ?? '');
         $this->token = (string) ($options['token'] ?? '');
-        if ($url === '' || $this->token === '' || $clientId === '') {
+        if ($url === '' || $this->token === '' || $clientKey === '') {
             throw new ProviderException(__('messages.provider.unavailable', [], $this->locale), ErrorCode::PROVIDER_UNAVAILABLE, context: ['reason' => 'configuration_missing']);
         }
-        $pid = (string) ($options['player_id'] ?? 'pokerx').'-'.$userId.'-'.$clientId;
+        $pid = ($options['player_id'] ?? 'pokerx').'-'.$clientKey;
         $url .= (str_contains($url, '?') ? '&' : '?').'pid='.rawurlencode($pid);
-        $prefix = 'proto-ws:'.substr(hash('sha256', $url.'|'.$this->token), 0, 20).':'.$userId.':'.$clientId;
+        $prefix = 'proto-ws:'.substr(hash('sha256', $url.'|'.$this->token), 0, 20).':'.$clientKey;
         $this->leaseKey = $prefix.':lease';
         $this->sessionKey = $prefix.':session';
 

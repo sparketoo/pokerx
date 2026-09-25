@@ -94,7 +94,6 @@ final class GameServer implements OnCloseInterface, OnMessageInterface, OnOpenIn
     {
         $fd = $frame->fd;
         $id = null;
-        $locale = $this->connections[$fd]->locale ?? null;
         $this->logger->debug('Poker Server Message', ['fd' => $fd, 'data' => $frame->data]);
         try {
             try {
@@ -150,10 +149,11 @@ final class GameServer implements OnCloseInterface, OnMessageInterface, OnOpenIn
     public function onClose($server, int $fd, int $reactorId): void
     {
         $connection = $this->connections[$fd] ?? null;
-        unset($this->connections[$fd]);
+
         if ($connection === null) {
             return;
         }
+        unset($this->connections[$fd]);
         $this->logger->debug('Poker Server Closed', [
             'fd' => $fd,
             'reactor_id' => $reactorId,
@@ -223,7 +223,7 @@ final class GameServer implements OnCloseInterface, OnMessageInterface, OnOpenIn
             $payload['small_blind'],
             $payload['players'],
             $payload['button_seat_number'],
-            $this->connection($message->fd)->clientId,
+            $this->connection($message->fd)->token->getKey(),
         );
 
         try {

@@ -52,7 +52,7 @@ final class GameService
         int $smallBlind,
         array $players,
         int $buttonSeatNumber,
-        string $clientId,
+        int $tokenId,
     ): GameVo {
         $uuid = Str::uuid()->toString();
         $game = new GameVo(
@@ -65,7 +65,7 @@ final class GameService
             $ante,
             $players,
             $buttonSeatNumber,
-            $clientId,
+            $tokenId,
         );
         $existsKey = 'game:'.$userId.':'.$network->name.':'.$gameKey;
         $exists = $this->redis->get($existsKey);

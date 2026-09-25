@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Game\Providers;
 
 use App\Vo\Game\GameEventVo;
+use App\Vo\Game\GameServerConnectionVo;
 use App\Vo\Game\GameVo;
 use Psr\Log\LoggerInterface;
 
@@ -12,6 +13,16 @@ use function App\Support\di;
 
 abstract class BaseProvider implements ProviderInterface
 {
+    public function connect(GameServerConnectionVo $connection): void
+    {
+        //
+    }
+
+    public function disconnect(GameServerConnectionVo $connection): void
+    {
+        //
+    }
+
     public function start(GameVo $game): void {}
 
     public function postBlind(GameEventVo $event): void {}

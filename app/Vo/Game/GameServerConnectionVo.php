@@ -10,8 +10,6 @@ use App\Vo\Vo;
 
 class GameServerConnectionVo extends Vo
 {
-    public readonly string $clientId;
-
     public ?int $lastMessageTimestamp = null;
 
     public bool $ready = true;
@@ -20,7 +18,5 @@ class GameServerConnectionVo extends Vo
         public readonly int $fd,
         public readonly User $user,
         public readonly UserToken $token,
-    ) {
-        $this->clientId = (string) $this->token->id;
-    }
+    ) {}
 }

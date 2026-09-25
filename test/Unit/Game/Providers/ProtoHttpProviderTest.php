@@ -757,7 +757,7 @@ final class ProtoHttpProviderTest extends TestCase
             ['uid' => 'small', 'seat' => 2, 'stack' => 190, 'hero' => false],
             ['uid' => 'big', 'seat' => 3, 'stack' => 190, 'hero' => false],
             ['uid' => 'other', 'seat' => 4, 'stack' => 190, 'hero' => false],
-        ], 1, '1');
+        ], 1, 1);
         $game->event(GameEventTypeEnum::POST_BLIND, ['uid' => 'other', 'amount' => 2], 1);
         $game->event(GameEventTypeEnum::STAGE, ['stage' => 'PREFLOP', 'cards' => []], 2);
         $provider = new ProtoHttpProvider(['url' => 'https://proto.example']);
@@ -808,7 +808,7 @@ final class ProtoHttpProviderTest extends TestCase
                 ['uid' => 'villain-1', 'seat' => 2, 'stack' => 1000, 'hero' => false],
             ],
             1,
-            '1',
+            1,
         );
     }
 

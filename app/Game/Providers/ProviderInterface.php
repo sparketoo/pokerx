@@ -5,11 +5,16 @@ declare(strict_types=1);
 namespace App\Game\Providers;
 
 use App\Vo\Game\GameEventVo;
+use App\Vo\Game\GameServerConnectionVo;
 use App\Vo\Game\GameVo;
 use Closure;
 
 interface ProviderInterface
 {
+    public function connect(GameServerConnectionVo $connection): void;
+
+    public function disconnect(GameServerConnectionVo $connection): void;
+
     public function start(GameVo $game): void;
 
     public function postBlind(GameEventVo $event): void;

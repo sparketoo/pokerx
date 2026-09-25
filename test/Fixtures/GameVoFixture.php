@@ -12,7 +12,7 @@ final class GameVoFixture
     public static function headsUp(
         string $uuid = '11111111-1111-4111-8111-000000000001',
         int $ante = 10,
-        string $clientId = '1'
+        int $clientId = 1
     ): GameVo {
         return new GameVo(1, $uuid, NetworkEnum::WE, 'room-1#1', 100, 50, $ante, [
             ['uid' => 'hero', 'seat' => 1, 'stack' => 1000, 'hero' => true],

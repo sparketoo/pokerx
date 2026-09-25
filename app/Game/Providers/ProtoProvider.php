@@ -9,6 +9,7 @@ use App\Enum\ActionEnum;
 use App\Exception\ProviderException;
 use App\Game\Socket\ProtoWebSocketClient;
 use App\Vo\Game\GameEventVo;
+use App\Vo\Game\GameServerConnectionVo;
 use App\Vo\Game\GameVo;
 use App\Vo\Game\RequestActionResultVo;
 use Closure;
@@ -19,7 +20,7 @@ use function Hyperf\Translation\__;
 
 final class ProtoProvider extends BaseProvider
 {
-    /** @var array<string, array{fd: int, client: ProtoWebSocketClient}> */
+    /** @var array<string, ProtoWebSocketClient> */
     private array $clients = [];
 
     private readonly ProtoHttpProvider $messages;
@@ -34,35 +35,13 @@ final class ProtoProvider extends BaseProvider
         $this->messages = new ProtoHttpProvider($options);
     }
 
-    public function connect(int $fd, int $userId, string $clientId): void
+    public function disconnect(GameServerConnectionVo $connection): void
     {
-        $key = $this->key($userId, $clientId);
-        if (isset($this->clients[$key])) {
-            throw new ProviderException(__('messages.provider.unavailable'), ErrorCode::PROVIDER_UNAVAILABLE,
-                context: ['reason' => 'client_already_connected']);
+        $key = $this->key($connection->user->id, $connection->token->id);
+        if (! empty($this->clients[$key])) {
+            $this->clients[$key]->close();
+            unset($this->clients[$key]);
         }
-        $client = new ProtoWebSocketClient($userId, $clientId, $this->options, $this->redis);
-        $this->clients[$key] = ['fd' => $fd, 'client' => $client];
-        try {
-            $client->connect();
-        } catch (Throwable $error) {
-            if ($this->clientForKey($key) === $client) {
-                unset($this->clients[$key]);
-            }
-            $client->close();
-            throw $error;
-        }
-    }
-
-    public function disconnect(int $fd, int $userId, string $clientId): void
-    {
-        $key = $this->key($userId, $clientId);
-        $entry = $this->clients[$key] ?? null;
-        if ($entry === null || $entry['fd'] !== $fd) {
-            return;
-        }
-        unset($this->clients[$key]);
-        $entry['client']->close();
     }
 
     public function requestAction(GameVo $game, Closure $callback): void
@@ -92,22 +71,26 @@ final class ProtoProvider extends BaseProvider
 
     private function client(GameVo $game): ProtoWebSocketClient
     {
-        return $this->clients[$this->key($game->userId, $game->clientId)]['client']
-            ?? throw new ProviderException(
-                __('messages.provider.unavailable'),
-                ErrorCode::PROVIDER_UNAVAILABLE,
-                context: ['reason' => 'game_client_missing'],
-            );
+        $key = $this->key($game->userId, $game->tokenId);
+        if (empty($this->clients[$key])) {
+            $client = new ProtoWebSocketClient($key, $this->options, $this->redis);
+
+            try {
+                $client->connect();
+            } catch (Throwable $error) {
+                $client->close();
+                throw $error;
+            }
+
+            $this->clients[$key] = $client;
+        }
+
+        return $this->clients[$key];
     }
 
-    private function key(int $userId, string $clientId): string
+    private function key(int $userId, int $tokenId): string
     {
-        return $userId.':'.$clientId;
-    }
-
-    private function clientForKey(string $key): ?ProtoWebSocketClient
-    {
-        return $this->clients[$key]['client'] ?? null;
+        return $userId.':'.$tokenId;
     }
 
     /** @param  array<string, mixed>  $response */

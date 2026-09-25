@@ -63,7 +63,7 @@ class GameVo extends Vo
         public readonly int $ante,
         array $players,
         public readonly int $buttonSeatNumber,
-        public readonly string $clientId,
+        public readonly int $tokenId,
     ) {
         $seats = array_column($players, 'seat');
         sort($seats, SORT_NUMERIC);
