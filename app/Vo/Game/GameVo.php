@@ -63,12 +63,12 @@ class GameVo extends Vo
         public readonly int $ante,
         array $players,
         public readonly int $buttonSeatNumber,
-        public readonly ?string $clientId = null,
+        public readonly string $clientId,
     ) {
         $seats = array_column($players, 'seat');
         sort($seats, SORT_NUMERIC);
         if (count($seats) < 2 || ! in_array($buttonSeatNumber, $seats, true)) {
-            throw new GameException(__('messages.game.big_blind_not_found'), ErrorCode::BUSINESS_ERROR);
+            throw new GameException(__('messages.game.big_blind_not_found'));
         }
         $nextSeat = static function (int $seat) use ($seats): int {
             foreach ($seats as $candidate) {

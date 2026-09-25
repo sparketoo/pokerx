@@ -175,9 +175,9 @@ final class ProtoWebSocketClient extends WebSocketClient
 
         $this->sessionId = $response['sessionId'];
         $saved = $this->redis->eval(
-            "if redis.call('get', KEYS[1]) ~= ARGV[1] then return 0 end redis.call('setex', ARGV[2], ARGV[3], ARGV[4]) return 1",
-            [$this->leaseKey, $this->leaseOwner, $this->sessionKey, self::SESSION_TTL, $this->sessionId],
-            1,
+            "if redis.call('get', KEYS[1]) ~= ARGV[1] then return 0 end redis.call('setex', KEYS[2], ARGV[2], ARGV[3]) return 1",
+            [$this->leaseKey, $this->sessionKey, $this->leaseOwner, self::SESSION_TTL, $this->sessionId],
+            2,
         );
         if ((int) $saved !== 1) {
             throw new ProviderException(__('messages.provider.unavailable', [], $this->locale), ErrorCode::PROVIDER_UNAVAILABLE, context: ['reason' => 'lease_lost']);
@@ -252,9 +252,9 @@ final class ProtoWebSocketClient extends WebSocketClient
             return;
         }
         $renewed = $this->redis->eval(
-            "if redis.call('get', KEYS[1]) ~= ARGV[1] then return 0 end redis.call('expire', KEYS[1], ARGV[2]) redis.call('expire', ARGV[3], ARGV[4]) return 1",
-            [$this->leaseKey, $this->leaseOwner, self::LEASE_TTL, $this->sessionKey, self::SESSION_TTL],
-            1,
+            "if redis.call('get', KEYS[1]) ~= ARGV[1] then return 0 end redis.call('expire', KEYS[1], ARGV[2]) redis.call('expire', KEYS[2], ARGV[3]) return 1",
+            [$this->leaseKey, $this->sessionKey, $this->leaseOwner, self::LEASE_TTL, self::SESSION_TTL],
+            2,
         );
         if ((int) $renewed !== 1) {
             $this->close();

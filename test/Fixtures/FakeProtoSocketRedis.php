@@ -9,6 +9,8 @@ use LogicException;
 
 final class FakeProtoSocketRedis extends Redis
 {
+    private const string PREFIX = 'pokerx:';
+
     /** @var array<string, string> */
     public array $values = [];
 
@@ -18,10 +20,11 @@ final class FakeProtoSocketRedis extends Redis
     public function __call(string $name, array $arguments): mixed
     {
         if ($name === 'get') {
-            return $this->values[$arguments[0]] ?? false;
+            return $this->values[self::PREFIX.$arguments[0]] ?? false;
         }
         if ($name === 'set') {
             [$key, $value, $options] = $arguments;
+            $key = self::PREFIX.$key;
             if (in_array('NX', $options, true) && isset($this->values[$key])) {
                 return false;
             }
@@ -30,21 +33,25 @@ final class FakeProtoSocketRedis extends Redis
             return true;
         }
         if ($name === 'eval') {
-            [$script, $args] = $arguments;
-            if (($this->values[$args[0]] ?? null) !== $args[1]) {
+            [$script, $args, $numKeys] = $arguments;
+            for ($index = 0; $index < $numKeys; $index++) {
+                $args[$index] = self::PREFIX.$args[$index];
+            }
+            if (($this->values[$args[0]] ?? null) !== $args[$numKeys]) {
                 return 0;
             }
             if (str_contains($script, "redis.call('del'")) {
                 unset($this->values[$args[0]]);
             }
             if (str_contains($script, "redis.call('setex'")) {
-                $this->values[$args[2]] = $args[4];
+                $sessionKey = str_contains($script, 'KEYS[2]') ? $args[1] : $args[2];
+                $this->values[$sessionKey] = $args[array_key_last($args)];
             }
 
             return 1;
         }
         if ($name === 'del') {
-            unset($this->values[$arguments[0]]);
+            unset($this->values[self::PREFIX.$arguments[0]]);
 
             return 1;
         }

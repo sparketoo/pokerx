@@ -9,7 +9,7 @@ use App\Enum\GameEventTypeEnum;
 use App\Enum\NetworkEnum;
 use App\Exception\GameException;
 use App\Game\GameProviderManager;
-use App\Job\GameCloseJob;
+use App\Job\GameStoreJob;
 use App\Model\Game;
 use App\Model\GameEvent;
 use App\Model\GamePlayer;
@@ -18,37 +18,24 @@ use App\Vo\Game\GameEventVo;
 use App\Vo\Game\GameVo;
 use Carbon\Carbon;
 use Hyperf\AsyncQueue\Driver\DriverFactory;
+use Hyperf\Coroutine\Coroutine;
 use Hyperf\DbConnection\Db;
 use Hyperf\Redis\Redis;
 use Hyperf\Stringable\Str;
-use RuntimeException;
+use Psr\Log\LoggerInterface;
 use Throwable;
 
-use function App\Support\di;
 use function Hyperf\Translation\__;
 
 final class GameService
 {
-    private const int GAME_TTL = 3600;
-
-    private const string REFRESH_GAME_KEY_SCRIPT = <<<'LUA'
-        local owner = redis.call('get', KEYS[1])
-        if owner and owner ~= ARGV[1] then return 0 end
-        redis.call('set', KEYS[1], ARGV[1], 'EX', tonumber(ARGV[2]) + 1)
-        redis.call('set', KEYS[2], ARGV[3], 'EX', ARGV[2])
-        return 1
-        LUA;
-
-    private const string RELEASE_GAME_KEY_SCRIPT = <<<'LUA'
-        if redis.call('get', KEYS[1]) == ARGV[1] then
-            return redis.call('del', KEYS[1])
-        end
-        return 0
-        LUA;
+    private const int STORE_TRANSACTION_ATTEMPTS = 3;
 
     public function __construct(
         protected readonly GameProviderManager $pokerManager,
         protected readonly Redis $redis,
+        protected readonly DriverFactory $driverFactory,
+        protected readonly LoggerInterface $logger,
     ) {}
 
     /**
@@ -65,7 +52,7 @@ final class GameService
         int $smallBlind,
         array $players,
         int $buttonSeatNumber,
-        ?string $clientId = null,
+        string $clientId,
     ): GameVo {
         $uuid = Str::uuid()->toString();
         $game = new GameVo(
@@ -80,31 +67,20 @@ final class GameService
             $buttonSeatNumber,
             $clientId,
         );
+        $existsKey = 'game:'.$userId.':'.$network->name.':'.$gameKey;
+        $exists = $this->redis->get($existsKey);
+        if (! $exists) {
+            $exists = Game::query()->where('user_id', $userId)
+                ->where('network', $network->name)
+                ->where('game_key', $gameKey)->exists();
+        }
 
-        if (Game::query()->where('user_id', $userId)
-            ->where('network', $network->name)
-            ->where('game_key', $gameKey)->exists()) {
+        if ($exists) {
             throw new GameException(__('messages.game.already_exists'), ErrorCode::GAME_ALREADY_EXISTS);
         }
-
-        $indexKey = $this->gameKeyIndex($game);
-        if ($this->redis->set($indexKey, $uuid, ['NX', 'EX' => self::GAME_TTL + 1]) !== true) {
-            throw new GameException(__('messages.game.already_exists'), ErrorCode::GAME_ALREADY_EXISTS);
-        }
-
-        try {
-            $this->save($game);
-            // 30分钟后自动CLOSED
-            $driver = di(DriverFactory::class)->get('default');
-            if (! $driver->push(new GameCloseJob($uuid)->setMaxAttempts(3), 30 * 60)) {
-                throw new RuntimeException('Failed to schedule game close job.');
-            }
-        } catch (Throwable $error) {
-            $this->redis->del('game:'.$uuid);
-            $this->releaseGameKey($game);
-
-            throw $error;
-        }
+        $this->redis->setex($existsKey, 4000, '1');
+        $this->save($game);
+        $this->queueToStore($game, 20 * 60);
 
         return $game;
     }
@@ -117,32 +93,18 @@ final class GameService
         } catch (Throwable) {
             throw new GameException(__('messages.game.not_found'), ErrorCode::GAME_NOT_FOUND, ['uuid' => $uuid]);
         }
-        if (! $game instanceof GameVo) {
-            throw new GameException(__('messages.game.not_found'), ErrorCode::GAME_NOT_FOUND, ['uuid' => $uuid]);
-        }
 
         return $game;
     }
 
     public function save(GameVo $game): void
     {
-        if ($this->redis->eval(self::REFRESH_GAME_KEY_SCRIPT,
-            [$this->gameKeyIndex($game), 'game:'.$game->uuid, $game->uuid, self::GAME_TTL, serialize($game)], 2) !== 1) {
-            throw new GameException(__('messages.game.already_exists'), ErrorCode::GAME_ALREADY_EXISTS);
-        }
+        $this->redis->setex('game:'.$game->uuid, 3600, serialize($game));
     }
 
     public function delete(string $uuid): void
     {
-        try {
-            $game = $this->find($uuid);
-        } catch (GameException) {
-            $game = null;
-        }
         $this->redis->del('game:'.$uuid);
-        if ($game !== null) {
-            $this->releaseGameKey($game);
-        }
     }
 
     /**
@@ -164,14 +126,28 @@ final class GameService
         return $event;
     }
 
-    public function store(GameVo $game): Game
+    public function queueToStore(GameVo $game, int $delay = 0): void
     {
-        return Db::transaction(function () use ($game): Game {
+        $job = new GameStoreJob($game->uuid);
+        $this->driverFactory->get('default')->push($job, $delay);
+    }
+
+    public function store(GameVo $game): ?Game
+    {
+        $playerRows = $this->playerRows($game);
+        $eventRows = $this->eventRows($game);
+        $attempt = 0;
+
+        return Db::transaction(function () use ($game, $playerRows, $eventRows, &$attempt): Game {
+            if ($attempt++ > 0) {
+                Coroutine::sleep(random_int(20, 50) * ($attempt - 1) / 1000);
+            }
             /** @var Game|null $record */
             $record = Game::query()->where('uuid', $game->uuid)->lockForUpdate()->first();
             if ($record !== null && $record->events()->count() > $game->events->count()) {
                 return $record;
             }
+            $isNew = $record === null;
             $record ??= new Game;
             $hero = $game->hero();
             $record->fill([
@@ -195,53 +171,71 @@ final class GameService
             }
             $record->saveOrFail();
 
-            $record->gamePlayers()->delete();
-            foreach ($game->players as $player) {
-                $row = new GamePlayer;
-                $row->fill([
-                    'game_id' => $record->id,
-                    'seat' => $player->seatNumber,
-                    'uid' => $player->uid,
-                    'name' => $player->name,
-                    'is_hero' => $player->isHero,
-                    'stack' => $player->stack,
-                    'ante' => $player->ante,
-                    'blind' => $player->blind,
-                    'post_blind' => $player->postBlind,
-                    'straddle_blind' => $player->straddleBlind,
-                    'returned' => $player->returned,
-                    'bet' => $player->bet,
-                    'total' => $player->total(),
-                    'cards' => $player->cards === [] ? null : CardVo::cardsToShort($player->cards),
-                ]);
-                $row->saveOrFail();
+            if (! $isNew) {
+                $record->gamePlayers()->delete();
+                $record->events()->delete();
             }
-
-            $record->events()->delete();
-            foreach ($game->events as $event) {
-                $row = new GameEvent;
-                $row->fill([
-                    'user_id' => $game->userId,
-                    'game_id' => $record->id,
-                    'type' => $event->type->name,
-                    'timestamp' => $event->timestamp,
-                    'payload' => $event->payload,
-                    'created_at' => Carbon::createFromTimestampMs($event->timestamp, 'UTC'),
-                ]);
-                $row->saveOrFail();
-            }
+            GamePlayer::query()->insert(array_map(
+                static fn (array $row): array => ['game_id' => $record->id, ...$row],
+                $playerRows,
+            ));
+            GameEvent::query()->insert(array_map(
+                static fn (array $row): array => ['game_id' => $record->id, ...$row],
+                $eventRows,
+            ));
 
             return $record;
-        });
+        }, self::STORE_TRANSACTION_ATTEMPTS);
     }
 
-    private function gameKeyIndex(GameVo $game): string
+    /** @return list<array<string, mixed>> */
+    private function playerRows(GameVo $game): array
     {
-        return 'game:key:'.$game->userId.':'.$game->network->name.':'.hash('sha256', $game->gameKey);
+        $rows = [];
+        $now = Carbon::now();
+        foreach ($game->players as $player) {
+            $row = new GamePlayer;
+            $row->fill([
+                'seat' => $player->seatNumber,
+                'uid' => $player->uid,
+                'name' => $player->name,
+                'is_hero' => $player->isHero,
+                'stack' => $player->stack,
+                'ante' => $player->ante,
+                'blind' => $player->blind,
+                'post_blind' => $player->postBlind,
+                'straddle_blind' => $player->straddleBlind,
+                'returned' => $player->returned,
+                'bet' => $player->bet,
+                'total' => $player->total(),
+                'cards' => $player->cards === [] ? null : CardVo::cardsToShort($player->cards),
+                'created_at' => $now,
+                'updated_at' => $now,
+            ]);
+            $rows[] = $row->getAttributes();
+        }
+
+        return $rows;
     }
 
-    private function releaseGameKey(GameVo $game): void
+    /** @return list<array<string, mixed>> */
+    private function eventRows(GameVo $game): array
     {
-        $this->redis->eval(self::RELEASE_GAME_KEY_SCRIPT, [$this->gameKeyIndex($game), $game->uuid], 1);
+        $rows = [];
+        $now = Carbon::now();
+        foreach ($game->events as $event) {
+            $row = new GameEvent;
+            $row->fill([
+                'user_id' => $game->userId,
+                'type' => $event->type->name,
+                'timestamp' => $event->timestamp,
+                'payload' => $event->payload,
+                'created_at' => Carbon::createFromTimestampMs($event->timestamp, 'UTC'),
+                'updated_at' => $now,
+            ]);
+            $rows[] = $row->getAttributes();
+        }
+
+        return $rows;
     }
 }

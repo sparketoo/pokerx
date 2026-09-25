@@ -12,20 +12,16 @@ use App\Enum\StageEnum;
 use App\Exception\AppException;
 use App\Exception\AuthException;
 use App\Exception\GameException;
-use App\Game\Providers\ProtoProvider;
 use App\Game\Providers\ProviderInterface;
 use App\Service\GameService;
 use App\Service\InsuranceService;
 use App\Service\UserTokenService;
 use App\Vo\Game\GameServerConnectionVo;
 use App\Vo\Game\GameServerMessageVo;
-use App\Vo\Game\GameVo;
 use App\Vo\Game\RequestActionResultVo;
-use Hyperf\Context\Context;
 use Hyperf\Contract\OnCloseInterface;
 use Hyperf\Contract\OnMessageInterface;
 use Hyperf\Contract\OnOpenInterface;
-use Hyperf\Contract\TranslatorInterface;
 use Hyperf\Stringable\Str;
 use Hyperf\Validation\Contract\ValidatorFactoryInterface;
 use Hyperf\Validation\ValidationException;
@@ -35,12 +31,13 @@ use Psr\Log\LoggerInterface;
 use Swoole\Coroutine;
 use Throwable;
 
-use function App\Support\di;
 use function Hyperf\Translation\__;
 
 final class GameServer implements OnCloseInterface, OnMessageInterface, OnOpenInterface
 {
     public const string TYPE_PING = 'PING';
+
+    public const string TYPE_ACCEPT = 'ACCEPT';
 
     // 请求下注决策
     public const string TYPE_REQUEST_ACTION = 'REQUEST_ACTION';
@@ -82,41 +79,8 @@ final class GameServer implements OnCloseInterface, OnMessageInterface, OnOpenIn
             return;
         }
 
-        $connection = new GameServerConnectionVo($request->fd, $token->user, $token, $locale);
-        $connection->ready = false;
-        $this->connections[$request->fd] = $connection;
-        $provider = null;
-        try {
-            $provider = $this->provider();
-            if ($provider instanceof ProtoProvider) {
-                $provider->connect($request->fd, $token->user->id, $connection->clientId, $connection->locale);
-            }
-        } catch (Throwable $error) {
-            if (($this->connections[$request->fd] ?? null) === $connection) {
-                unset($this->connections[$request->fd]);
-                $server->disconnect($request->fd);
-            }
-            $this->logger->warning('Poker Server Proto connection failed', [
-                ...($error instanceof AppException ? $error->context() : []),
-                'fd' => $request->fd,
-                'user_id' => $token->user->id,
-                'code' => $error instanceof AppException ? $error->getCode() : ErrorCode::SERVER_ERROR,
-                'exception' => $error,
-                'file' => $error->getFile(),
-                'line' => $error->getLine(),
-            ]);
-
-            return;
-        }
-        if (($this->connections[$request->fd] ?? null) !== $connection) {
-            if ($provider instanceof ProtoProvider) {
-                $provider->disconnect($request->fd, $token->user->id, $connection->clientId);
-            }
-
-            return;
-        }
-        $connection->ready = true;
-        $this->reply($request->fd, 'ACCEPT');
+        $this->connections[$request->fd] = new GameServerConnectionVo($request->fd, $token->user, $token);
+        $this->reply($request->fd, self::TYPE_ACCEPT);
         $this->logger->debug('Poker Server Connected', [
             'fd' => $request->fd,
             'user_id' => $token->user->id,
@@ -131,12 +95,6 @@ final class GameServer implements OnCloseInterface, OnMessageInterface, OnOpenIn
         $fd = $frame->fd;
         $id = null;
         $locale = $this->connections[$fd]->locale ?? null;
-        $localeKey = sprintf('%s::locale', TranslatorInterface::class);
-        $hadLocale = Context::has($localeKey);
-        $previousLocale = $hadLocale ? Context::get($localeKey) : null;
-        if ($locale !== null) {
-            di(TranslatorInterface::class)->setLocale($locale);
-        }
         $this->logger->debug('Poker Server Message', ['fd' => $fd, 'data' => $frame->data]);
         try {
             try {
@@ -185,16 +143,7 @@ final class GameServer implements OnCloseInterface, OnMessageInterface, OnOpenIn
 
         } catch (Throwable $error) {
             $this->replyError($fd, $error, $id);
-        } finally {
-            if ($locale !== null) {
-                if ($hadLocale) {
-                    Context::set($localeKey, $previousLocale);
-                } else {
-                    Context::destroy($localeKey);
-                }
-            }
         }
-
     }
 
     /** @param  mixed  $server */
@@ -204,18 +153,6 @@ final class GameServer implements OnCloseInterface, OnMessageInterface, OnOpenIn
         unset($this->connections[$fd]);
         if ($connection === null) {
             return;
-        }
-        try {
-            $provider = $this->provider();
-            if ($provider instanceof ProtoProvider) {
-                $provider->disconnect($fd, $connection->user->id, $connection->clientId);
-            }
-        } catch (Throwable $error) {
-            $this->logger->warning('Poker Server Proto disconnect failed', [
-                ...($error instanceof AppException ? $error->context() : []),
-                'fd' => $fd,
-                'exception' => $error,
-            ]);
         }
         $this->logger->debug('Poker Server Closed', [
             'fd' => $fd,
@@ -231,16 +168,6 @@ final class GameServer implements OnCloseInterface, OnMessageInterface, OnOpenIn
      */
     protected function handleEvent(GameServerMessageVo $message): void
     {
-        if ($message->type === self::TYPE_REQUEST_INSURANCE
-            || ($message->type !== GameEventTypeEnum::START->name
-                && $message->type !== GameEventTypeEnum::OVER->name
-                && GameEventTypeEnum::has($message->type))) {
-            $gameId = $message->payload['game_uuid'] ?? null;
-            if (is_string($gameId) && Str::isUuid($gameId) && $this->provider() instanceof ProtoProvider) {
-                $this->assertGameConnection($this->gameService->find($gameId), $message);
-            }
-        }
-
         if ($message->type === self::TYPE_REQUEST_ACTION) {
             $this->handleRequestAction($message);
 
@@ -256,9 +183,6 @@ final class GameServer implements OnCloseInterface, OnMessageInterface, OnOpenIn
             throw new GameException(__('messages.game.event_type_invalid'), ErrorCode::EVENT_INVALID);
         }
         $method = 'handle'.Str::studly($message->type);
-        if (! method_exists($this, $method)) {
-            throw new GameException(__('messages.game.event_type_invalid'), ErrorCode::EVENT_INVALID);
-        }
 
         $this->$method($message);
     }
@@ -342,8 +266,8 @@ final class GameServer implements OnCloseInterface, OnMessageInterface, OnOpenIn
     {
         $payload = $this->validatorFactory->make($message->payload, [
             'game_uuid' => ['required', 'uuid'],
-            'uid' => ['required', 'string', 'regex:/\A[A-Za-z0-9]{1,16}\z/'],
             'amount' => ['required', 'integer:strict', 'min:1', 'max:100000000'],
+            'uid' => ['required', 'string', 'regex:/\A[A-Za-z0-9]{1,16}\z/'],
         ])->validate();
 
         $payload['uid'] = strtolower($payload['uid']);
@@ -481,19 +405,8 @@ final class GameServer implements OnCloseInterface, OnMessageInterface, OnOpenIn
         ])->validate();
 
         $game = $this->gameService->find($payload['game_uuid']);
-        $this->assertGameConnection($game, $message);
-        $connection = $this->connection($message->fd);
-        $this->logger->info('Poker action requested', [
-            'message_id' => $message->id,
-            'game_id' => $game->uuid,
-            'user_id' => $game->userId,
-            'fd' => $message->fd,
-        ]);
         $this->provider()->requestAction($game,
-            function (RequestActionResultVo $result) use ($game, $message, $connection) {
-                if (($this->connections[$message->fd] ?? null) !== $connection) {
-                    return;
-                }
+            function (RequestActionResultVo $result) use ($game, $message) {
                 if ($result->success) {
                     $this->ack($message->fd, self::TYPE_REQUEST_ACTION, $message->id, [
                         'game_uuid' => $game->uuid,
@@ -538,25 +451,6 @@ final class GameServer implements OnCloseInterface, OnMessageInterface, OnOpenIn
             'shown.*.cards.*' => ['required', 'string', 'max:3'],
         ])->validate();
 
-        foreach ($payload['winners'] as &$winner) {
-            $winner['uid'] = strtolower($winner['uid']);
-        }
-        unset($winner);
-        if (isset($payload['returns'])) {
-            foreach ($payload['returns'] as &$return) {
-                $return['uid'] = strtolower($return['uid']);
-            }
-            unset($return);
-        }
-        if (isset($payload['shown'])) {
-            foreach ($payload['shown'] as &$shown) {
-                $shown['uid'] = strtolower($shown['uid']);
-            }
-            unset($shown);
-        }
-
-        $this->assertGameConnection($this->gameService->find($payload['game_uuid']), $message);
-
         $event = $this->gameService->event(
             $payload['game_uuid'],
             GameEventTypeEnum::fromNameOrFail($message->type),
@@ -564,7 +458,7 @@ final class GameServer implements OnCloseInterface, OnMessageInterface, OnOpenIn
             $message->timestamp,
         );
         $this->provider()->over($event);
-        $this->gameService->store($event->game);
+        $this->gameService->queueToStore($event->game);
         $this->ack($message->fd, $message->type, $message->id);
     }
 
@@ -584,7 +478,7 @@ final class GameServer implements OnCloseInterface, OnMessageInterface, OnOpenIn
             $message->timestamp,
         );
         $this->provider()->abort($event);
-        $this->gameService->store($event->game);
+        $this->gameService->queueToStore($event->game);
         $this->ack($message->fd, $message->type, $message->id);
 
     }
@@ -595,30 +489,14 @@ final class GameServer implements OnCloseInterface, OnMessageInterface, OnOpenIn
         // first frame immediately after the upgrade, before that callback stores
         // the authenticated connection. Yield briefly so that a valid first frame
         // is not rejected merely because of scheduler ordering.
-        for ($attempt = 0; $attempt < 50 && ! isset($this->connections[$fd]); $attempt++) {
+        for ($attempt = 0; $attempt < 50; $attempt++) {
+            if (isset($this->connections[$fd])) {
+                return $this->connections[$fd];
+            }
             Coroutine::sleep(0.001);
         }
 
-        $connection = $this->connections[$fd] ?? null;
-        if ($connection === null) {
-            throw new AuthException(__('messages.auth.required'), ErrorCode::AUTH_REQUIRED);
-        }
-        for ($attempt = 0; $attempt < 1200; $attempt++) {
-            if ($this->storedConnection($fd) !== $connection) {
-                break;
-            }
-            if ($connection->ready) {
-                return $connection;
-            }
-            Coroutine::sleep(0.01);
-        }
-
         throw new AuthException(__('messages.auth.required'), ErrorCode::AUTH_REQUIRED);
-    }
-
-    private function storedConnection(int $fd): ?GameServerConnectionVo
-    {
-        return $this->connections[$fd] ?? null;
     }
 
     /** @param  array<string, mixed>  $payload */
@@ -697,16 +575,5 @@ final class GameServer implements OnCloseInterface, OnMessageInterface, OnOpenIn
     protected function provider(): ProviderInterface
     {
         return $this->poker->provider();
-    }
-
-    private function assertGameConnection(GameVo $game, GameServerMessageVo $message): void
-    {
-        if (! $this->provider() instanceof ProtoProvider) {
-            return;
-        }
-        $connection = $this->connection($message->fd);
-        if ($game->userId !== $message->user->id || $game->clientId !== $connection->clientId) {
-            throw new GameException(__('messages.game.not_found'), ErrorCode::GAME_NOT_FOUND);
-        }
     }
 }

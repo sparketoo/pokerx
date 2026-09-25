@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Exception;
 
+use App\Constants\ErrorCode;
 use RuntimeException;
 use Throwable;
 
@@ -15,7 +16,7 @@ abstract class AppException extends RuntimeException
      */
     public function __construct(
         string $message,
-        int $code,
+        int $code = ErrorCode::BUSINESS_ERROR,
         private readonly array $details = [],
         ?Throwable $previous = null,
         private readonly array $context = [],
