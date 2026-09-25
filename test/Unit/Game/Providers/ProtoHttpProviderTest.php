@@ -32,7 +32,10 @@ final class ProtoHttpProviderTest extends TestCase
         $replies = [
             ['result' => true, 'sessionId' => 'session-123'],
             ['result' => true],
-            ['structType' => 'playerAction', 'gameId' => '12345678-90ab-4cde-8f01-23456789abcd', 'action' => 'all-In', 'amount' => 100],
+            [
+                'structType' => 'playerAction', 'gameId' => '12345678-90ab-4cde-8f01-23456789abcd',
+                'action' => 'all-In', 'amount' => 100,
+            ],
             ['result' => true],
         ];
         $client = new class($replies) implements ClientInterface
@@ -43,10 +46,10 @@ final class ProtoHttpProviderTest extends TestCase
             /** @var list<array<string, mixed>> */
             public array $settings = [];
 
-            /** @param list<array<string, mixed>> $replies */
+            /** @param  list<array<string, mixed>>  $replies */
             public function __construct(private array $replies) {}
 
-            /** @param array<string, mixed> $settings */
+            /** @param  array<string, mixed>  $settings */
             public function set(array $settings): bool
             {
                 $this->settings[] = $settings;
@@ -54,12 +57,18 @@ final class ProtoHttpProviderTest extends TestCase
                 return true;
             }
 
-            /** @param array<string, list<string>> $headers */
-            public function request(string $method = 'GET', string $path = '/', array $headers = [], string $contents = '', string $version = '1.1'): RawResponseInterface
-            {
+            /** @param  array<string, list<string>>  $headers */
+            public function request(
+                string $method = 'GET',
+                string $path = '/',
+                array $headers = [],
+                string $contents = '',
+                string $version = '1.1'
+            ): RawResponseInterface {
                 $this->requests[] = compact('method', 'path', 'headers', 'contents');
 
-                return new RawResponse(200, [], json_encode(array_shift($this->replies), JSON_THROW_ON_ERROR), $version);
+                return new RawResponse(200, [], json_encode(array_shift($this->replies), JSON_THROW_ON_ERROR),
+                    $version);
             }
         };
         $endpoints = [];
@@ -107,7 +116,8 @@ final class ProtoHttpProviderTest extends TestCase
         self::assertSame('gameEvents', $this->body($client->requests[1])['structType']);
         self::assertSame('getAnswer', $this->body($client->requests[2])['structType']);
         self::assertSame('fullGameLog', $this->body($client->requests[3])['structType']);
-        self::assertSame('gameOver', $this->body($client->requests[3])['events'][count($this->body($client->requests[3])['events']) - 1]['eventType']);
+        self::assertSame('gameOver',
+            $this->body($client->requests[3])['events'][count($this->body($client->requests[3])['events']) - 1]['eventType']);
     }
 
     public function test_http_error_is_returned_through_callback(): void
@@ -117,15 +127,20 @@ final class ProtoHttpProviderTest extends TestCase
             /** @var list<array{method: string, path: string, headers: array<string, list<string>>, contents: string}> */
             public array $requests = [];
 
-            /** @param array<string, mixed> $settings */
+            /** @param  array<string, mixed>  $settings */
             public function set(array $settings): bool
             {
                 return true;
             }
 
-            /** @param array<string, list<string>> $headers */
-            public function request(string $method = 'GET', string $path = '/', array $headers = [], string $contents = '', string $version = '1.1'): RawResponseInterface
-            {
+            /** @param  array<string, list<string>>  $headers */
+            public function request(
+                string $method = 'GET',
+                string $path = '/',
+                array $headers = [],
+                string $contents = '',
+                string $version = '1.1'
+            ): RawResponseInterface {
                 $this->requests[] = compact('method', 'path', 'headers', 'contents');
                 $body = json_decode($contents, true);
 
@@ -153,7 +168,9 @@ final class ProtoHttpProviderTest extends TestCase
 
     public function test_502_or_invalid_json_retries_only_the_failed_command_once(): void
     {
-        foreach ([[502, 'Bad Gateway', 'gameEvents'], [200, '{invalid', 'getAnswer'], [200, 'null', 'gameEvents']] as [$status, $body, $failedCommand]) {
+        foreach ([
+            [502, 'Bad Gateway', 'gameEvents'], [200, '{invalid', 'getAnswer'], [200, 'null', 'gameEvents'],
+        ] as [$status, $body, $failedCommand]) {
             $client = new class($status, $body, $failedCommand) implements ClientInterface
             {
                 /** @var list<array{body: array<string, mixed>, headers: array<string, list<string>>}> */
@@ -167,15 +184,20 @@ final class ProtoHttpProviderTest extends TestCase
                     private readonly string $failedCommand,
                 ) {}
 
-                /** @param array<string, mixed> $settings */
+                /** @param  array<string, mixed>  $settings */
                 public function set(array $settings): bool
                 {
                     return true;
                 }
 
-                /** @param array<string, list<string>> $headers */
-                public function request(string $method = 'GET', string $path = '/', array $headers = [], string $contents = '', string $version = '1.1'): RawResponseInterface
-                {
+                /** @param  array<string, list<string>>  $headers */
+                public function request(
+                    string $method = 'GET',
+                    string $path = '/',
+                    array $headers = [],
+                    string $contents = '',
+                    string $version = '1.1'
+                ): RawResponseInterface {
                     $payload = json_decode($contents, true, 512, JSON_THROW_ON_ERROR);
                     $this->requests[] = ['body' => $payload, 'headers' => $headers];
                     if (isset($payload['token'])) {
@@ -223,15 +245,20 @@ final class ProtoHttpProviderTest extends TestCase
 
                 public function __construct(private readonly int $status, private readonly string $body) {}
 
-                /** @param array<string, mixed> $settings */
+                /** @param  array<string, mixed>  $settings */
                 public function set(array $settings): bool
                 {
                     return true;
                 }
 
-                /** @param array<string, list<string>> $headers */
-                public function request(string $method = 'GET', string $path = '/', array $headers = [], string $contents = '', string $version = '1.1'): RawResponseInterface
-                {
+                /** @param  array<string, list<string>>  $headers */
+                public function request(
+                    string $method = 'GET',
+                    string $path = '/',
+                    array $headers = [],
+                    string $contents = '',
+                    string $version = '1.1'
+                ): RawResponseInterface {
                     $payload = json_decode($contents, true, 512, JSON_THROW_ON_ERROR);
                     $this->requests[] = $payload;
 
@@ -247,9 +274,10 @@ final class ProtoHttpProviderTest extends TestCase
             );
 
             $result = null;
-            $provider->requestAction($this->game(), static function (RequestActionResultVo $answer) use (&$result): void {
-                $result = $answer;
-            });
+            $provider->requestAction($this->game(),
+                static function (RequestActionResultVo $answer) use (&$result): void {
+                    $result = $answer;
+                });
 
             self::assertInstanceOf(RequestActionResultVo::class, $result);
             self::assertFalse($result->success);
@@ -274,15 +302,20 @@ final class ProtoHttpProviderTest extends TestCase
 
                 public int $answers = 0;
 
-                /** @param array<string, mixed> $settings */
+                /** @param  array<string, mixed>  $settings */
                 public function set(array $settings): bool
                 {
                     return true;
                 }
 
-                /** @param array<string, list<string>> $headers */
-                public function request(string $method = 'GET', string $path = '/', array $headers = [], string $contents = '', string $version = '1.1'): RawResponseInterface
-                {
+                /** @param  array<string, list<string>>  $headers */
+                public function request(
+                    string $method = 'GET',
+                    string $path = '/',
+                    array $headers = [],
+                    string $contents = '',
+                    string $version = '1.1'
+                ): RawResponseInterface {
                     $payload = json_decode($contents, true, 512, JSON_THROW_ON_ERROR);
                     if (isset($payload['token'])) {
                         $this->authentications++;
@@ -298,7 +331,8 @@ final class ProtoHttpProviderTest extends TestCase
 
                     return match ($this->answers) {
                         1 => new RawResponse(502, [], 'Bad Gateway secret-token session-1', $version),
-                        2 => new RawResponse(400, [], '{"error":"invalid sessionId","info":"secret-token session-1"}', $version),
+                        2 => new RawResponse(400, [], '{"error":"invalid sessionId","info":"secret-token session-1"}',
+                            $version),
                         default => new RawResponse(200, [], '{"result":false,"info":"No token data"}', $version),
                     };
                 }
@@ -310,9 +344,10 @@ final class ProtoHttpProviderTest extends TestCase
             );
 
             $result = null;
-            $provider->requestAction($this->game(), static function (RequestActionResultVo $answer) use (&$result): void {
-                $result = $answer;
-            });
+            $provider->requestAction($this->game(),
+                static function (RequestActionResultVo $answer) use (&$result): void {
+                    $result = $answer;
+                });
 
             self::assertInstanceOf(RequestActionResultVo::class, $result);
             self::assertFalse($result->success);
@@ -320,11 +355,16 @@ final class ProtoHttpProviderTest extends TestCase
             self::assertSame(3, $client->answers);
 
             $records = $handler->getRecords();
-            $requests = array_values(array_filter($records, static fn ($record): bool => $record->message === 'Proto HTTP request'));
-            $responses = array_values(array_filter($records, static fn ($record): bool => $record->message === 'Proto HTTP response'));
-            $retries = array_values(array_filter($records, static fn ($record): bool => $record->message === 'Proto HTTP retry'));
-            $sessions = array_values(array_filter($records, static fn ($record): bool => $record->message === 'Proto HTTP session invalidated'));
-            $failures = array_values(array_filter($records, static fn ($record): bool => $record->message === 'Proto HTTP action failed'));
+            $requests = array_values(array_filter($records,
+                static fn ($record): bool => $record->message === 'Proto HTTP request'));
+            $responses = array_values(array_filter($records,
+                static fn ($record): bool => $record->message === 'Proto HTTP response'));
+            $retries = array_values(array_filter($records,
+                static fn ($record): bool => $record->message === 'Proto HTTP retry'));
+            $sessions = array_values(array_filter($records,
+                static fn ($record): bool => $record->message === 'Proto HTTP session invalidated'));
+            $failures = array_values(array_filter($records,
+                static fn ($record): bool => $record->message === 'Proto HTTP action failed'));
 
             self::assertCount(7, $requests);
             self::assertCount(7, $responses);
@@ -370,15 +410,20 @@ final class ProtoHttpProviderTest extends TestCase
 
             public int $authentications = 0;
 
-            /** @param array<string, mixed> $settings */
+            /** @param  array<string, mixed>  $settings */
             public function set(array $settings): bool
             {
                 return true;
             }
 
-            /** @param array<string, list<string>> $headers */
-            public function request(string $method = 'GET', string $path = '/', array $headers = [], string $contents = '', string $version = '1.1'): RawResponseInterface
-            {
+            /** @param  array<string, list<string>>  $headers */
+            public function request(
+                string $method = 'GET',
+                string $path = '/',
+                array $headers = [],
+                string $contents = '',
+                string $version = '1.1'
+            ): RawResponseInterface {
                 $body = json_decode($contents, true, 512, JSON_THROW_ON_ERROR);
                 $this->requests[] = ['body' => $body, 'headers' => $headers];
                 if (isset($body['token'])) {
@@ -431,15 +476,20 @@ final class ProtoHttpProviderTest extends TestCase
 
             public bool $failNextGameEvents = false;
 
-            /** @param array<string, mixed> $settings */
+            /** @param  array<string, mixed>  $settings */
             public function set(array $settings): bool
             {
                 return true;
             }
 
-            /** @param array<string, list<string>> $headers */
-            public function request(string $method = 'GET', string $path = '/', array $headers = [], string $contents = '', string $version = '1.1'): RawResponseInterface
-            {
+            /** @param  array<string, list<string>>  $headers */
+            public function request(
+                string $method = 'GET',
+                string $path = '/',
+                array $headers = [],
+                string $contents = '',
+                string $version = '1.1'
+            ): RawResponseInterface {
                 $body = json_decode($contents, true, 512, JSON_THROW_ON_ERROR);
                 if (isset($body['token'])) {
                     $this->authentications++;
@@ -493,15 +543,20 @@ final class ProtoHttpProviderTest extends TestCase
         {
             public int $requests = 0;
 
-            /** @param array<string, mixed> $settings */
+            /** @param  array<string, mixed>  $settings */
             public function set(array $settings): bool
             {
                 return true;
             }
 
-            /** @param array<string, list<string>> $headers */
-            public function request(string $method = 'GET', string $path = '/', array $headers = [], string $contents = '', string $version = '1.1'): RawResponseInterface
-            {
+            /** @param  array<string, list<string>>  $headers */
+            public function request(
+                string $method = 'GET',
+                string $path = '/',
+                array $headers = [],
+                string $contents = '',
+                string $version = '1.1'
+            ): RawResponseInterface {
                 $this->requests++;
                 $body = json_decode($contents, true, 512, JSON_THROW_ON_ERROR);
                 $response = isset($body['token'])
@@ -541,15 +596,20 @@ final class ProtoHttpProviderTest extends TestCase
 
             public int $requests = 0;
 
-            /** @param array<string, mixed> $settings */
+            /** @param  array<string, mixed>  $settings */
             public function set(array $settings): bool
             {
                 return true;
             }
 
-            /** @param array<string, list<string>> $headers */
-            public function request(string $method = 'GET', string $path = '/', array $headers = [], string $contents = '', string $version = '1.1'): RawResponseInterface
-            {
+            /** @param  array<string, list<string>>  $headers */
+            public function request(
+                string $method = 'GET',
+                string $path = '/',
+                array $headers = [],
+                string $contents = '',
+                string $version = '1.1'
+            ): RawResponseInterface {
                 $this->requests++;
                 $body = json_decode($contents, true, 512, JSON_THROW_ON_ERROR);
                 if (isset($body['token'])) {
@@ -572,9 +632,10 @@ final class ProtoHttpProviderTest extends TestCase
             $redis,
         );
         $firstResult = null;
-        $provider->requestAction($this->game(), static function (RequestActionResultVo $result) use (&$firstResult): void {
-            $firstResult = $result;
-        });
+        $provider->requestAction($this->game(),
+            static function (RequestActionResultVo $result) use (&$firstResult): void {
+                $firstResult = $result;
+            });
         self::assertInstanceOf(RequestActionResultVo::class, $firstResult);
         self::assertTrue($firstResult->success);
         self::assertSame(2, $client->authentications);
@@ -591,15 +652,20 @@ final class ProtoHttpProviderTest extends TestCase
 
             public function __construct(private readonly FakeProtoHttpRedis $redis) {}
 
-            /** @param array<string, mixed> $settings */
+            /** @param  array<string, mixed>  $settings */
             public function set(array $settings): bool
             {
                 return true;
             }
 
-            /** @param array<string, list<string>> $headers */
-            public function request(string $method = 'GET', string $path = '/', array $headers = [], string $contents = '', string $version = '1.1'): RawResponseInterface
-            {
+            /** @param  array<string, list<string>>  $headers */
+            public function request(
+                string $method = 'GET',
+                string $path = '/',
+                array $headers = [],
+                string $contents = '',
+                string $version = '1.1'
+            ): RawResponseInterface {
                 $body = json_decode($contents, true, 512, JSON_THROW_ON_ERROR);
                 if (isset($body['token'])) {
                     $this->authentications++;
@@ -641,15 +707,20 @@ final class ProtoHttpProviderTest extends TestCase
         {
             public int $authentications = 0;
 
-            /** @param array<string, mixed> $settings */
+            /** @param  array<string, mixed>  $settings */
             public function set(array $settings): bool
             {
                 return true;
             }
 
-            /** @param array<string, list<string>> $headers */
-            public function request(string $method = 'GET', string $path = '/', array $headers = [], string $contents = '', string $version = '1.1'): RawResponseInterface
-            {
+            /** @param  array<string, list<string>>  $headers */
+            public function request(
+                string $method = 'GET',
+                string $path = '/',
+                array $headers = [],
+                string $contents = '',
+                string $version = '1.1'
+            ): RawResponseInterface {
                 $body = json_decode($contents, true, 512, JSON_THROW_ON_ERROR);
                 if (isset($body['token'])) {
                     $this->authentications++;
@@ -686,7 +757,7 @@ final class ProtoHttpProviderTest extends TestCase
             ['uid' => 'small', 'seat' => 2, 'stack' => 190, 'hero' => false],
             ['uid' => 'big', 'seat' => 3, 'stack' => 190, 'hero' => false],
             ['uid' => 'other', 'seat' => 4, 'stack' => 190, 'hero' => false],
-        ], 1);
+        ], 1, '1');
         $game->event(GameEventTypeEnum::POST_BLIND, ['uid' => 'other', 'amount' => 2], 1);
         $game->event(GameEventTypeEnum::STAGE, ['stage' => 'PREFLOP', 'cards' => []], 2);
         $provider = new ProtoHttpProvider(['url' => 'https://proto.example']);
@@ -714,7 +785,8 @@ final class ProtoHttpProviderTest extends TestCase
         self::assertSame('blindPosted', $events[$stage + 1]['eventType']);
         self::assertSame('STRADDLE', $events[$stage + 1]['blindType']);
         self::assertSame(200, $events[$stage + 1]['amount']);
-        $wins = array_values(array_filter($events, static fn (array $event): bool => $event['eventType'] === 'playerWon'));
+        $wins = array_values(array_filter($events,
+            static fn (array $event): bool => $event['eventType'] === 'playerWon'));
         self::assertSame([
             ['eventType' => 'playerWon', 'name' => 'hero-1', 'amount' => 325],
             ['eventType' => 'playerWon', 'name' => 'villain-1', 'amount' => 7],
@@ -736,6 +808,7 @@ final class ProtoHttpProviderTest extends TestCase
                 ['uid' => 'villain-1', 'seat' => 2, 'stack' => 1000, 'hero' => false],
             ],
             1,
+            '1',
         );
     }
 

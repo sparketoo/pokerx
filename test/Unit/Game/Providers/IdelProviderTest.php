@@ -98,6 +98,6 @@ final class IdelProviderTest extends TestCase
         return new GameVo(1, '33333333-3333-4333-8333-333333333333', NetworkEnum::WE, 'room#1', 100, 50, 10, [
             ['uid' => 'hero', 'seat' => $heroSeat, 'stack' => $heroStack, 'hero' => true],
             ['uid' => 'villain', 'seat' => $heroSeat === 1 ? 2 : 1, 'stack' => 1000, 'hero' => false],
-        ], 1);
+        ], 1, '1');
     }
 }

@@ -60,7 +60,7 @@ final class MockProviderTest extends TestCase
             ['uid' => 'hero', 'seat' => 1, 'stack' => 4, 'hero' => true],
             ['uid' => 'small', 'seat' => 2, 'stack' => 100, 'hero' => false],
             ['uid' => 'big', 'seat' => 3, 'stack' => 100, 'hero' => false],
-        ], 1);
+        ], 1, '1');
         $game->event(GameEventTypeEnum::POST_BLIND, ['uid' => 'hero', 'amount' => 2], 1);
 
         $result = $this->request(new MockProvider(1), $game);
@@ -119,6 +119,6 @@ final class MockProviderTest extends TestCase
         return new GameVo(1, $uuid, NetworkEnum::WE, 'room#1', 100, 50, 10, [
             ['uid' => 'hero', 'seat' => 1, 'stack' => $heroStack, 'hero' => true],
             ['uid' => 'villain', 'seat' => 2, 'stack' => 1000, 'hero' => false],
-        ], 1);
+        ], 1, '1');
     }
 }

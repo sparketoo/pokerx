@@ -31,7 +31,7 @@ final class GameVoTest extends TestCase
         $game = new GameVo(1, '1234567890abcdef', NetworkEnum::WE, 'room#1', 100, 50, 0, [
             ['uid' => 'HeRo1', 'seat' => 1, 'stack' => 1000, 'hero' => true],
             ['uid' => 'ViLlAiN2', 'seat' => 2, 'stack' => 1000, 'hero' => false],
-        ], 1);
+        ], 1, '1');
 
         $action = $game->event(GameEventTypeEnum::ACTION, [
             'uid' => 'villain2', 'action' => 'BET', 'amount' => 50,
@@ -65,7 +65,7 @@ final class GameVoTest extends TestCase
             ['uid' => 'hero', 'seat' => 2, 'stack' => 1000, 'hero' => true],
             ['uid' => 'villain-1', 'seat' => 5, 'stack' => 1000, 'hero' => false],
             ['uid' => 'villain-2', 'seat' => 8, 'stack' => 1000, 'hero' => false],
-        ], 8);
+        ], 8, '1');
 
         self::assertSame(2, $game->smallBlindSeatNumber());
         self::assertSame(5, $game->bigBlindSeatNumber());
@@ -99,7 +99,8 @@ final class GameVoTest extends TestCase
         for ($seat = 1; $seat <= 8; $seat++) {
             $players[] = ['uid' => 'player'.$seat, 'seat' => $seat, 'stack' => 190, 'hero' => $seat === 3];
         }
-        $game = new GameVo(1, '11111111-1111-4111-8111-000000000002', NetworkEnum::OK, 'room-129', 2, 1, 2, $players, 4);
+        $game = new GameVo(1, '11111111-1111-4111-8111-000000000002', NetworkEnum::OK, 'room-129', 2, 1, 2, $players,
+            4, '1');
         self::assertSame(19, $game->pot());
 
         $heroPost = $game->event(GameEventTypeEnum::POST_BLIND, ['uid' => 'PLAYER3', 'amount' => 2], 1);
@@ -137,7 +138,7 @@ final class GameVoTest extends TestCase
         $short = new GameVo(1, '11111111-1111-4111-8111-000000000003', NetworkEnum::WE, 'short-post', 2, 1, 2, [
             ['uid' => 'hero', 'seat' => 1, 'stack' => 3, 'hero' => true],
             ['uid' => 'villain', 'seat' => 2, 'stack' => 100, 'hero' => false],
-        ], 1);
+        ], 1, '1');
         try {
             $short->event(GameEventTypeEnum::POST_BLIND, ['uid' => 'hero', 'amount' => 1], 1);
             self::fail('POST_BLIND cannot exceed remaining stack');
@@ -231,7 +232,7 @@ final class GameVoTest extends TestCase
             new GameVo(1, '11111111-1111-4111-8111-000000000001', NetworkEnum::WE, 'room-1#1', 100, 50, 0, [
                 ['uid' => 'a', 'seat' => 1, 'stack' => 1000, 'hero' => false],
                 ['uid' => 'b', 'seat' => 2, 'stack' => 1000, 'hero' => false],
-            ], 1);
+            ], 1, '1');
             self::fail('A game without hero must be rejected');
         } catch (GameException $error) {
             self::assertSame(1000, $error->getCode());

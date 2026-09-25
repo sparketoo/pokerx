@@ -8,6 +8,7 @@ use App\Exception\ProviderException;
 use App\Game\Socket\ProtoWebSocketClient;
 use Closure;
 use Swoole\Coroutine;
+use Swoole\Coroutine\Channel;
 use Swoole\Coroutine\Http\Client;
 use Tests\Fixtures\FakeProtoSocketRedis;
 use Tests\Fixtures\FakeWebSocketTransport;
@@ -23,16 +24,82 @@ final class ProtoWebSocketClientTest extends TestCase
             $first->receive('{"result":true,"sessionId":"session-1"}');
             $client = $this->client('42', $redis, static fn (): Client => $first);
             $client->connect();
+            $answer = new Channel(1);
+            Coroutine::create(static function () use ($client, $answer): void {
+                $answer->push($client->request('game-1',
+                    ['structType' => 'gameEvents', 'gameId' => 'game-1'],
+                    ['structType' => 'getAnswer', 'gameId' => 'game-1'],
+                ));
+            });
+            Coroutine::sleep(0.02);
+            $first->receive('{"structType":"playerAction","gameId":"game-1","action":"check"}');
+            self::assertSame('check', $answer->pop(1)['action']);
+            self::assertSame(['gameEvents', 'getAnswer'], array_map(
+                static fn (array $sent): string => json_decode($sent['data'], true)['structType'],
+                array_slice($first->sent, 1),
+            ));
             $client->close();
 
             $second = new FakeWebSocketTransport;
             $second->receive('{"result":true,"sessionId":"session-1"}');
             $replacement = $this->client('42', $redis, static fn (): Client => $second);
             $replacement->connect();
+            $nextAnswer = new Channel(1);
+            Coroutine::create(static function () use ($replacement, $nextAnswer): void {
+                $nextAnswer->push($replacement->request('game-1',
+                    ['structType' => 'gameEvents', 'gameId' => 'game-1'],
+                    ['structType' => 'getAnswer', 'gameId' => 'game-1'],
+                ));
+            });
+            Coroutine::sleep(0.02);
+            $second->receive('{"structType":"playerAction","gameId":"game-1","action":"fold"}');
 
             self::assertSame('session-1', json_decode($second->sent[0]['data'], true)['sessionId']);
+            self::assertSame('fold', $nextAnswer->pop(1)['action']);
             self::assertSame('/?pid=pokerx-1-42', $second->path);
             $replacement->close();
+        });
+    }
+
+    public function test_expired_session_cache_authenticates_without_old_session_id(): void
+    {
+        Coroutine\run(function (): void {
+            $redis = new FakeProtoSocketRedis;
+            $first = new FakeWebSocketTransport;
+            $first->receive('{"result":true,"sessionId":"expired"}');
+            $client = $this->client('42', $redis, static fn (): Client => $first);
+            $client->connect();
+            $client->close();
+
+            $redis->values = [];
+            $fresh = new FakeWebSocketTransport;
+            $fresh->receive('{"result":true,"sessionId":"new"}');
+            $replacement = $this->client('42', $redis, static fn (): Client => $fresh);
+            $replacement->connect();
+
+            self::assertArrayNotHasKey('sessionId', json_decode($fresh->sent[0]['data'], true));
+            $replacement->close();
+        });
+    }
+
+    public function test_upstream_socket_disconnect_reauthenticates_with_saved_session(): void
+    {
+        Coroutine\run(function (): void {
+            $redis = new FakeProtoSocketRedis;
+            $first = new FakeWebSocketTransport;
+            $first->receive('{"result":true,"sessionId":"saved"}');
+            $second = new FakeWebSocketTransport;
+            $second->receive('{"result":true,"sessionId":"saved"}');
+            $sockets = [$first, $second];
+            $client = $this->client('42', $redis, static function () use (&$sockets): Client {
+                return array_shift($sockets) ?? throw new \RuntimeException('No transport available');
+            });
+            $client->connect();
+            $first->close();
+            Coroutine::sleep(1.1);
+
+            self::assertSame('saved', json_decode($second->sent[0]['data'], true)['sessionId']);
+            $client->close();
         });
     }
 
