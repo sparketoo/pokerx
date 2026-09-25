@@ -218,9 +218,9 @@ HTTP 的通用错误码包括 `auth_failed`、`auth_required`、`two_factor_requ
 
 ### 2.8 游戏配置
 
-两个接口都需要登录令牌，并按当前用户及 `network` 独立保存配置。这里的 HTTP `network` 使用小写值 `ok`、`we`、`wpk`、`wpk_club`。
+两个接口都需要登录令牌，并按当前用户及 `network` 独立保存配置。这里的 HTTP `network` 使用大写值 `OK`、`WE`、`WPK`、`WPK_CLUB`。
 
-`GET /api/mine/game_config?network=ok` 返回该网络下的全部配置，按 `key` 升序排列；无配置时 `items` 为空数组。成功响应示例：
+`GET /api/mine/game_config?network=OK` 返回该网络下的全部配置，按 `key` 升序排列；无配置时 `items` 为空数组。成功响应示例：
 
 ```json
 {"code":"success","message":"ok","data":{"items":[{"key":"insurance_default","value":"MAX"},{"key":"insurance_outs_2","value":"1/8"}]}}
