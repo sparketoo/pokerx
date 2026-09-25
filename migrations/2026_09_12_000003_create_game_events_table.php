@@ -18,6 +18,7 @@ return new class extends Migration
             $table->json('payload');
             $table->timestamps(6);
 
+            $table->index('game_id');
             $table->index(['user_id', 'created_at']);
             $table->index(['user_id', 'game_id', 'created_at', 'id']);
         });

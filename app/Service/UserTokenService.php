@@ -59,7 +59,6 @@ final class UserTokenService
         if (! $token->user || ! $token->user->status->isNormal()) {
             return null;
         }
-        $token->forceFill(['last_used_at' => now(date_default_timezone_get())])->save();
 
         return $token;
     }

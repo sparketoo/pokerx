@@ -63,30 +63,41 @@ final class GameServer implements OnCloseInterface, OnMessageInterface, OnOpenIn
     /** @param  mixed  $server */
     public function onOpen($server, $request): void
     {
-        $token = $request->get['token'] ?? null;
-        $locale = $request->get['locale'] ?? null;
+        $authenticated = false;
+        try {
+            $token = $request->get['token'] ?? null;
+            $locale = $request->get['locale'] ?? null;
+            if (! is_string($token) || $token === '') {
+                return;
+            }
 
-        if (! $token) {
-            $server->disconnect($request->fd);
+            $token = $this->tokenService->validateToken($token);
+            if (empty($token->user)) {
+                return;
+            }
 
-            return;
+            $this->connections[$request->fd] = new GameServerConnectionVo($request->fd, $token->user, $token);
+            $this->reply($request->fd, self::TYPE_ACCEPT);
+            $this->logger->debug('Poker Server Connected', [
+                'fd' => $request->fd,
+                'user_id' => $token->user->id,
+                'locale' => $locale,
+                'token_id' => $token->id,
+            ]);
+            $authenticated = true;
+        } catch (Throwable $error) {
+            unset($this->connections[$request->fd]);
+            $this->logger->error('Poker Server authentication failed', [
+                'fd' => $request->fd,
+                'exception_class' => $error::class,
+                'file' => $error->getFile(),
+                'line' => $error->getLine(),
+            ]);
+        } finally {
+            if (! $authenticated) {
+                $server->disconnect($request->fd);
+            }
         }
-
-        $token = $this->tokenService->validateToken($token);
-        if (empty($token->user)) {
-            $server->disconnect($request->fd);
-
-            return;
-        }
-
-        $this->connections[$request->fd] = new GameServerConnectionVo($request->fd, $token->user, $token);
-        $this->reply($request->fd, self::TYPE_ACCEPT);
-        $this->logger->debug('Poker Server Connected', [
-            'fd' => $request->fd,
-            'user_id' => $token->user->id,
-            'locale' => $locale,
-            'token_id' => $token->id,
-        ]);
     }
 
     /** @param  mixed  $server */
