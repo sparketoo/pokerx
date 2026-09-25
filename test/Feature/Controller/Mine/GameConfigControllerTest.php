@@ -83,7 +83,7 @@ final class GameConfigControllerTest extends TestCase
             $this->call($controller, 'index', IndexRequest::class, ['network' => 'WPK_CLUB']);
             self::fail('An unauthenticated user must not read game configuration');
         } catch (AuthException $error) {
-            self::assertSame('auth_required', $error->getErrorCode());
+            self::assertSame(2000, $error->getCode());
         }
 
         UserGameConfig::query()->create(['user_id' => 1, 'network' => NetworkEnum::WPK_CLUB, 'key' => 'insurance_default', 'value' => InsuranceService::RATIO_8]);
@@ -93,7 +93,7 @@ final class GameConfigControllerTest extends TestCase
 
         $response = $this->call($controller, 'index', IndexRequest::class, ['network' => 'WPK_CLUB']);
 
-        self::assertSame(['code' => 'success', 'message' => 'ok', 'data' => [
+        self::assertSame(['code' => 0, 'message' => 'ok', 'data' => [
             'items' => [['key' => 'insurance_default', 'value' => InsuranceService::RATIO_8]],
         ]], $response);
     }
@@ -110,7 +110,7 @@ final class GameConfigControllerTest extends TestCase
                 ['key' => 'insurance_outs_2', 'value' => InsuranceService::RATIO_8],
             ],
         ], 'POST');
-        self::assertSame('success', $saved['code']);
+        self::assertSame(0, $saved['code']);
         self::assertSame('ok', $saved['message']);
         self::assertSame([
             ['key' => 'insurance_default', 'value' => InsuranceService::RATIO_MAX],
@@ -129,6 +129,36 @@ final class GameConfigControllerTest extends TestCase
             ['key' => 'insurance_outs_1', 'value' => InsuranceService::RATIO_MIN],
         ], $updated['data']['items']);
         self::assertSame(2, UserGameConfig::query()->where('user_id', 1)->where('network', 'OK')->count());
+    }
+
+    public function test_save_accepts_auto_bet_ranges_and_rejects_invalid_seconds(): void
+    {
+        $this->signIn(1);
+        $controller = $this->controller();
+        $items = [
+            ['key' => 'auto_bet_check_fold', 'value' => '0-1'],
+            ['key' => 'auto_bet_bet_raise', 'value' => '4-8'],
+            ['key' => 'auto_bet_call_all_in', 'value' => '2-3'],
+            ['key' => 'auto_bet_insurance', 'value' => '6-10'],
+        ];
+        $saved = $this->call($controller, 'save', SaveRequest::class, [
+            'network' => 'OK', 'items' => $items,
+        ], 'POST');
+        self::assertSame(0, $saved['code']);
+        self::assertSame('ok', $saved['message']);
+        self::assertSame(4, count($saved['data']['items']));
+
+        foreach (['8-11', '5-3', '0.5-2'] as $value) {
+            try {
+                $this->call($controller, 'save', SaveRequest::class, [
+                    'network' => 'OK',
+                    'items' => [['key' => 'auto_bet_insurance', 'value' => $value]],
+                ], 'POST');
+                self::fail('Invalid delay range must be rejected');
+            } catch (ValidationException) {
+                self::assertSame(4, UserGameConfig::query()->where('user_id', 1)->where('network', 'OK')->count());
+            }
+        }
     }
 
     public function test_save_accepts_every_insurance_ratio_constant(): void

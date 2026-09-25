@@ -4,9 +4,9 @@ declare(strict_types=1);
 
 namespace App\Service;
 
+use App\Constants\ErrorCode;
 use App\Enum\GameEventTypeEnum;
 use App\Enum\NetworkEnum;
-use App\Exception\FoundationException;
 use App\Exception\GameException;
 use App\Game\GameProviderManager;
 use App\Job\GameCloseJob;
@@ -25,6 +25,7 @@ use RuntimeException;
 use Throwable;
 
 use function App\Support\di;
+use function Hyperf\Translation\__;
 
 final class GameService
 {
@@ -64,6 +65,7 @@ final class GameService
         int $smallBlind,
         array $players,
         int $buttonSeatNumber,
+        ?string $clientId = null,
     ): GameVo {
         $uuid = Str::uuid()->toString();
         $game = new GameVo(
@@ -76,17 +78,18 @@ final class GameService
             $ante,
             $players,
             $buttonSeatNumber,
+            $clientId,
         );
 
         if (Game::query()->where('user_id', $userId)
             ->where('network', $network->name)
             ->where('game_key', $gameKey)->exists()) {
-            throw GameException::gameAlreadyExists();
+            throw new GameException(__('messages.game.already_exists'), ErrorCode::GAME_ALREADY_EXISTS);
         }
 
         $indexKey = $this->gameKeyIndex($game);
         if ($this->redis->set($indexKey, $uuid, ['NX', 'EX' => self::GAME_TTL + 1]) !== true) {
-            throw GameException::gameAlreadyExists();
+            throw new GameException(__('messages.game.already_exists'), ErrorCode::GAME_ALREADY_EXISTS);
         }
 
         try {
@@ -112,10 +115,10 @@ final class GameService
         try {
             $game = is_string($data) ? unserialize($data) : null;
         } catch (Throwable) {
-            throw GameException::gameUuidNotFound($uuid);
+            throw new GameException(__('messages.game.not_found'), ErrorCode::GAME_NOT_FOUND, ['uuid' => $uuid]);
         }
         if (! $game instanceof GameVo) {
-            throw GameException::gameUuidNotFound($uuid);
+            throw new GameException(__('messages.game.not_found'), ErrorCode::GAME_NOT_FOUND, ['uuid' => $uuid]);
         }
 
         return $game;
@@ -125,7 +128,7 @@ final class GameService
     {
         if ($this->redis->eval(self::REFRESH_GAME_KEY_SCRIPT,
             [$this->gameKeyIndex($game), 'game:'.$game->uuid, $game->uuid, self::GAME_TTL, serialize($game)], 2) !== 1) {
-            throw GameException::gameAlreadyExists();
+            throw new GameException(__('messages.game.already_exists'), ErrorCode::GAME_ALREADY_EXISTS);
         }
     }
 
@@ -146,7 +149,6 @@ final class GameService
      * @param  string  $uuid  游戏UUID
      * @param  array<string, mixed>  $payload
      *
-     * @throws FoundationException
      * @throws GameException
      */
     public function event(string $uuid, GameEventTypeEnum $type, array $payload, int $timestamp): GameEventVo

@@ -49,7 +49,7 @@ final class SecurityControllerTest extends DatabaseTestCase
             ], 'POST');
             self::fail('Wrong password must be rejected');
         } catch (AuthException $error) {
-            self::assertSame('auth_failed', $error->getErrorCode());
+            self::assertSame(2002, $error->getCode());
         }
 
         self::assertTrue(password_verify('original-password', User::query()->findOrFail($user->id)->password));
@@ -111,7 +111,7 @@ final class SecurityControllerTest extends DatabaseTestCase
             ], 'POST', ['Authorization' => 'Bearer '.$second]);
             self::fail('The setup state must be bound to its original token');
         } catch (AuthException $error) {
-            self::assertSame('setup_expired', $error->getErrorCode());
+            self::assertSame(2102, $error->getCode());
         }
 
         self::assertNull(User::query()->findOrFail($user->id)->two_factor_secret);

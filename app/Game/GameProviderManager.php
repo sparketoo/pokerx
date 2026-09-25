@@ -4,13 +4,17 @@ declare(strict_types=1);
 
 namespace App\Game;
 
+use App\Game\Providers\IdelProvider;
 use App\Game\Providers\MockProvider;
+use App\Game\Providers\ProtoHttpProvider;
 use App\Game\Providers\ProtoProvider;
 use App\Game\Providers\ProviderInterface;
 use Closure;
+use Hyperf\Redis\Redis;
 use Hyperf\Stringable\Str;
 use RuntimeException;
 
+use function App\Support\di;
 use function Hyperf\Config\config;
 
 final class GameProviderManager
@@ -55,15 +59,23 @@ final class GameProviderManager
         return $this->providers[$name] = $this->{$method}($config);
     }
 
-    /** @param array<string, mixed> $config */
+    /** @param  array<string, mixed>  $config */
+    public function createProtoHttpProvider(array $config = []): ProtoHttpProvider
+    {
+
+        return new ProtoHttpProvider($config);
+    }
+
+    /** @param  array<string, mixed>  $config */
     public function createProtoProvider(array $config = []): ProtoProvider
     {
-        $default = config('poker.proto_http', []);
+        return new ProtoProvider($config, di(Redis::class));
+    }
 
-        return new ProtoProvider([
-            ...$default,
-            ...$config,
-        ]);
+    /** @param  array<string, mixed>  $config */
+    public function createIdelProvider(array $config = []): IdelProvider
+    {
+        return new IdelProvider;
     }
 
     /**
@@ -71,12 +83,6 @@ final class GameProviderManager
      */
     public function createMockProvider(array $config = []): MockProvider
     {
-        $default = config('poker.mock', []);
-        $config = [
-            ...$default,
-            ...$config,
-        ];
-
         return new MockProvider((int) ($config['delay_ms'] ?? 50), (bool) ($config['failure'] ?? false));
     }
 }

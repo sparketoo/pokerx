@@ -8,7 +8,7 @@ use App\Enum\GameEventTypeEnum;
 use App\Enum\GameStatusEnum;
 use App\Enum\NetworkEnum;
 use App\Enum\StageEnum;
-use App\Exception\FoundationException;
+use App\Exception\BusinessException;
 use App\Exception\GameException;
 use App\Vo\Game\GameVo;
 use Tests\Fixtures\GameVoFixture;
@@ -16,6 +16,16 @@ use Tests\TestCase;
 
 final class GameVoTest extends TestCase
 {
+    public function test_client_id_survives_game_serialization_for_reconnection(): void
+    {
+        $game = new GameVo(1, '11111111-1111-4111-8111-000000000099', NetworkEnum::WE, 'room-1#99', 100, 50, 0, [
+            ['uid' => 'hero', 'seat' => 1, 'stack' => 1000, 'hero' => true],
+            ['uid' => 'villain', 'seat' => 2, 'stack' => 1000, 'hero' => false],
+        ], 1, '42');
+
+        self::assertSame('42', unserialize(serialize($game))->clientId);
+    }
+
     public function test_existing_mixed_case_player_uids_match_events_without_losing_original_casing(): void
     {
         $game = new GameVo(1, '1234567890abcdef', NetworkEnum::WE, 'room#1', 100, 50, 0, [
@@ -79,7 +89,7 @@ final class GameVoTest extends TestCase
         self::assertSame(220, $game->hero()->winnings);
         self::assertCount(5, $game->events);
 
-        $this->expectException(FoundationException::class);
+        $this->expectException(BusinessException::class);
         $game->event(GameEventTypeEnum::ACTION, ['uid' => 'hero', 'action' => 'CHECK', 'amount' => 0], 6);
     }
 
@@ -106,7 +116,7 @@ final class GameVoTest extends TestCase
             $game->event(GameEventTypeEnum::POST_BLIND, ['uid' => 'player8', 'amount' => 2], 3);
             self::fail('A duplicate POST_BLIND must not increase the pot');
         } catch (GameException $error) {
-            self::assertSame('event_invalid', $error->getErrorCode());
+            self::assertSame(3002, $error->getCode());
         }
         self::assertSame(23, $game->pot());
         self::assertCount(2, $game->events);
@@ -121,7 +131,7 @@ final class GameVoTest extends TestCase
             $game->event(GameEventTypeEnum::POST_BLIND, ['uid' => 'hero', 'amount' => 10], 2);
             self::fail('Late POST_BLIND must be rejected');
         } catch (GameException $error) {
-            self::assertSame('event_invalid', $error->getErrorCode());
+            self::assertSame(3002, $error->getCode());
         }
 
         $short = new GameVo(1, '11111111-1111-4111-8111-000000000003', NetworkEnum::WE, 'short-post', 2, 1, 2, [
@@ -132,7 +142,7 @@ final class GameVoTest extends TestCase
             $short->event(GameEventTypeEnum::POST_BLIND, ['uid' => 'hero', 'amount' => 1], 1);
             self::fail('POST_BLIND cannot exceed remaining stack');
         } catch (GameException $error) {
-            self::assertSame('event_invalid', $error->getErrorCode());
+            self::assertSame(3002, $error->getCode());
         }
     }
 
@@ -171,7 +181,7 @@ final class GameVoTest extends TestCase
             $game->event(GameEventTypeEnum::STRADDLE_BLIND, ['uid' => 'hero', 'amount' => 200], 2);
             self::fail('A straddle after the flop must be rejected');
         } catch (GameException $error) {
-            self::assertSame('event_invalid', $error->getErrorCode());
+            self::assertSame(3002, $error->getCode());
         }
         self::assertCount(1, $game->events);
 
@@ -180,7 +190,7 @@ final class GameVoTest extends TestCase
             $short->event(GameEventTypeEnum::STRADDLE_BLIND, ['uid' => 'hero', 'amount' => 941], 1);
             self::fail('A straddle cannot exceed the remaining stack');
         } catch (GameException $error) {
-            self::assertSame('event_invalid', $error->getErrorCode());
+            self::assertSame(3002, $error->getCode());
         }
         self::assertCount(0, $short->events);
     }
@@ -199,7 +209,7 @@ final class GameVoTest extends TestCase
                 ], 1);
                 self::fail('Invalid returns must be rejected');
             } catch (GameException $error) {
-                self::assertSame('event_invalid', $error->getErrorCode());
+                self::assertSame(3002, $error->getCode());
             }
             self::assertSame(GameStatusEnum::OPEN, $game->status);
             self::assertCount(0, $game->events);
@@ -224,14 +234,14 @@ final class GameVoTest extends TestCase
             ], 1);
             self::fail('A game without hero must be rejected');
         } catch (GameException $error) {
-            self::assertSame('hero_not_found', $error->getErrorCode());
+            self::assertSame(1000, $error->getCode());
         }
 
         try {
             GameVoFixture::headsUp()->playerOrFail('stranger');
             self::fail('Unknown player must be rejected');
         } catch (GameException $error) {
-            self::assertSame('player_not_found', $error->getErrorCode());
+            self::assertSame(1000, $error->getCode());
         }
     }
 }

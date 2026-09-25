@@ -1,32 +1,32 @@
 ---
 paths:
-  - 'app/Exception/**'
+  - 'app/**/*.php'
   - 'config/autoload/exceptions.php'
-  - 'storage/languages/*/errors/**'
+  - 'storage/languages/*/messages.php'
 ---
 
-# Exception Handling Best Practices
+# Exception Handling
 
-## Choose the Correct Exception Type
-Use `RuntimeException` or a native exception for runtime, configuration, environment, and programming failures; use `AppException` for expected business or input failures that need the project's localized error response.
+## Construct Exceptions at the Failure Site
+Use `throw new ...Exception(...)` where the failure is detected, and do not reintroduce static exception factories that move the recorded file and line.
 
-## Place Application Exceptions by Scope
-Put cross-module failures in `FoundationException`, authentication failures in `AuthException`, and game or provider failures in `GameException`; add a focused exception class only when a new domain needs it, and reuse an existing factory when semantics match.
+## Keep Error Codes Numeric and Centralized
+Pass an integer constant from `App\Constants\ErrorCode` to the exception constructor and use native `getCode()` for the client error code; never derive codes from class names or messages.
 
-## Derive Error Codes from Factory Methods
-Give each business error one public static factory named for the resource or failure reason; `AppException` derives the snake_case code from that camelCase method name, so avoid duplicate method names that produce ambiguous codes.
+## Use Exception Classes by Responsibility
+Use `BusinessException` for ordinary business rules, `AuthException` for authentication, `GameException` for game state, and `ProviderException` for external decision services; retain native exceptions for runtime and programming failures.
 
-## Follow Exception Translation Naming
-Use the camelCase factory method as the translation key in `storage/languages/{locale}/errors/{exception_without_Exception_in_snake_case}.php` for each supported locale.
+## Translate Before Construction
+Pass a localized message from `Hyperf\Translation\__()` into the constructor using an explicit message key, and keep translation lookup out of `AppException`.
 
-## Preserve the Exception Message Fallback Chain
-Preserve `AppException::getLocaleMessage()` fallback order: current locale, configured fallback locale, `errors/foundation.serverError`, then the safe hard-coded message.
+## Respect Coroutine Locale Boundaries
+Use the HTTP locale middleware for HTTP requests, restore a WebSocket message's locale after processing, and pass locale explicitly to background coroutines that construct client-facing exceptions.
 
-## Separate Public and Diagnostic Data
-Use `replace` for translation placeholders, `details` only for client-safe structured data, and `context` only for logs; do not expose secrets or internal diagnostics in the response.
+## Preserve Causes and Diagnostic Data
+Pass wrapped failures as `previous`, keep client-safe fields in `details`, and keep sanitized upstream errors and transport details in log-only `context`.
 
-## Assign Report Levels Consistently
-Leave routine business failures at the default `info` level, and use `warning()` or `error()` in exception factories only for failures that warrant that severity.
+## Keep Responses Safe and Consistent
+Return integer `code`, localized `message`, and optional `details` for expected errors; map unknown exceptions to `ErrorCode::SERVER_ERROR` without exposing their messages.
 
-## Let the Hyperf handler render HTTP failures
-Keep HTTP error serialization in `AppExceptionHandler` configured by `config/autoload/exceptions.php`; preserve the existing business error envelope and status behavior unless the API contract is explicitly changed.
+## Log the Original Failure
+Log the exception object, its creation file and line, and its diagnostic context for provider and unexpected failures while excluding credentials and session identifiers.

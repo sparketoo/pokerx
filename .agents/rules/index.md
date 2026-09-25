@@ -9,7 +9,7 @@ Before changing a file, read the matching rules below and `AGENTS.md`. Paths ref
 | `app/Command/**` | `.agents/rules/commands.md` |
 | `app/Controller/**`, `app/Request/**`, `config/routes.php`, `test/Feature/Controller/**` | `.agents/rules/controllers.md` |
 | `app/Enum/**`, `storage/languages/*/enums/**`, `test/**/Enum/**` | `.agents/rules/enums.md` |
-| `app/Exception/**`, `config/autoload/exceptions.php`, `storage/languages/*/errors/**` | `.agents/rules/exceptions.md` |
+| `app/**/*.php`, `config/autoload/exceptions.php`, `storage/languages/*/messages.php` | `.agents/rules/exceptions.md` |
 | `app/Support/**` | `.agents/rules/helpers.md` |
 | `app/Job/**`, `config/autoload/async_queue.php` | `.agents/rules/jobs.md` |
 | `app/Listener/**`, `config/autoload/listeners.php` | `.agents/rules/listeners.md` |

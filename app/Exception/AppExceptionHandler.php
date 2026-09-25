@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Exception;
 
+use App\Constants\ErrorCode;
 use Hyperf\ExceptionHandler\ExceptionHandler;
 use Hyperf\HttpMessage\Exception\HttpException;
 use Hyperf\HttpMessage\Stream\SwooleStream;
@@ -13,6 +14,7 @@ use Psr\Log\LoggerInterface;
 use Throwable;
 
 use function App\Support\di;
+use function Hyperf\Translation\__;
 
 final class AppExceptionHandler extends ExceptionHandler
 {
@@ -23,19 +25,31 @@ final class AppExceptionHandler extends ExceptionHandler
         if ($throwable instanceof AppException) {
             $error = $throwable->toResponseArray();
             $status = 200;
+            if ($throwable instanceof ProviderException) {
+                di(LoggerInterface::class)->warning('Provider request failed', [
+                    ...$throwable->context(),
+                    'code' => $throwable->getCode(),
+                    'exception' => $throwable,
+                    'file' => $throwable->getFile(),
+                    'line' => $throwable->getLine(),
+                ]);
+            }
         } elseif ($throwable instanceof ValidationException) {
             $status = 200;
             $error = [
-                'code' => 'event_invalid', 'message' => '参数无效',
+                'code' => ErrorCode::INVALID_INPUT, 'message' => __('messages.common.invalid_input'),
                 'details' => $throwable->validator->errors()->getMessages(),
             ];
         } elseif ($throwable instanceof HttpException) {
             $status = $throwable->getStatusCode();
-            $error = ['code' => $status === 429 ? 'rate_limited' : 'not_found', 'message' => $throwable->getMessage()];
+            $error = [
+                'code' => $status === 429 ? ErrorCode::RATE_LIMITED : ErrorCode::NOT_FOUND,
+                'message' => __($status === 429 ? 'messages.common.rate_limited' : 'messages.common.not_found'),
+            ];
         } else {
             di(LoggerInterface::class)->error('Request failed',
-                ['exception' => $throwable::class, 'message' => $throwable->getMessage()]);
-            $error = FoundationException::serverError()->toResponseArray();
+                ['exception' => $throwable, 'file' => $throwable->getFile(), 'line' => $throwable->getLine()]);
+            $error = ['code' => ErrorCode::SERVER_ERROR, 'message' => __('messages.common.server_error')];
         }
         if ($status === 429) {
             $status = 200;

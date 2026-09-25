@@ -4,9 +4,10 @@ declare(strict_types=1);
 
 namespace App\Controller\Mine;
 
+use App\Constants\ErrorCode;
 use App\Controller\ApiController;
 use App\Enum\GameEventTypeEnum;
-use App\Exception\FoundationException;
+use App\Exception\BusinessException;
 use App\Model\Game;
 use App\Model\GameEvent;
 use App\Request\Mine\Games\DetailRequest;
@@ -14,6 +15,8 @@ use App\Request\Mine\Games\EventsRequest;
 use App\Request\Mine\Games\IndexRequest;
 use Carbon\CarbonImmutable as Date;
 use Psr\Http\Message\ResponseInterface as JsonResponse;
+
+use function Hyperf\Translation\__;
 
 class GamesController extends ApiController
 {
@@ -52,7 +55,7 @@ class GamesController extends ApiController
             'gamePlayers' => fn ($q) => $q->orderBy('seat'),
         ])->first();
         if (! $g) {
-            throw FoundationException::notFound();
+            throw new BusinessException(__('messages.common.not_found'), ErrorCode::NOT_FOUND);
         }
 
         return $this->success(['game' => $g, 'live' => null, 'pending' => false]);
@@ -62,7 +65,7 @@ class GamesController extends ApiController
     {
         $g = Game::query()->where('user_id', $this->user($r)->id)->where('uuid', $r->gameId())->first();
         if (! $g) {
-            throw FoundationException::notFound();
+            throw new BusinessException(__('messages.common.not_found'), ErrorCode::NOT_FOUND);
         }
         $user = $this->user($r)->id;
         $f = $r->filters();
@@ -78,7 +81,7 @@ class GamesController extends ApiController
         if ($r->scope() === 'me') {
             $heroUid = $g->gamePlayers()->where('is_hero', true)->value('uid');
             if (! is_string($heroUid)) {
-                throw FoundationException::notFound();
+                throw new BusinessException(__('messages.common.not_found'), ErrorCode::NOT_FOUND);
             }
             $q->where(function ($q) use ($heroUid) {
                 $q->where('type', GameEventTypeEnum::DEALT->name)

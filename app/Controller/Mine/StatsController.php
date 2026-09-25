@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Controller\Mine;
 
+use App\Constants\ErrorCode;
 use App\Controller\ApiController;
 use App\Exception\GameException;
 use App\Model\Game;
@@ -13,6 +14,8 @@ use Carbon\CarbonImmutable as Date;
 use Hyperf\Database\Model\Builder;
 use Psr\Http\Message\ResponseInterface as JsonResponse;
 use RuntimeException;
+
+use function Hyperf\Translation\__;
 
 class StatsController extends ApiController
 {
@@ -54,7 +57,7 @@ class StatsController extends ApiController
         $startDate = Date::parse($start, 'Asia/Shanghai');
         $endDate = Date::parse($end, 'Asia/Shanghai');
         if ($startDate->diffInDays($endDate) > 3660 || $startDate > $endDate) {
-            throw GameException::eventInvalid();
+            throw new GameException(__('messages.game.event_invalid'), ErrorCode::EVENT_INVALID);
         }
 
         $games = Game::query()->where('user_id', $userId);

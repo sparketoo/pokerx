@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Middleware;
 
+use App\Constants\ErrorCode;
 use App\Exception\AuthException;
 use App\Model\User;
 use App\Model\UserToken;
@@ -14,6 +15,8 @@ use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
 use Psr\Http\Server\MiddlewareInterface;
 use Psr\Http\Server\RequestHandlerInterface;
+
+use function Hyperf\Translation\__;
 
 final readonly class Authenticate implements MiddlewareInterface
 {
@@ -35,16 +38,18 @@ final readonly class Authenticate implements MiddlewareInterface
             } else {
                 $header = $request->getHeaderLine('authorization');
                 if (! preg_match('/^Bearer (\d+)\|(.+)$/D', $header, $parts)) {
-                    throw AuthException::authRequired();
+                    throw new AuthException(__('messages.auth.required'), ErrorCode::AUTH_REQUIRED);
                 }
                 $token = UserToken::query()->find((int) $parts[1]);
-                if (! $token || ! hash_equals($token->token, hash('sha256',
-                    $parts[2])) || ($token->expires_at && $token->expires_at->isPast())) {
-                    throw AuthException::authRequired();
+                if (! $token || ! hash_equals($token->token, hash('sha256', $parts[2]))) {
+                    throw new AuthException(__('messages.auth.required'), ErrorCode::AUTH_REQUIRED);
+                }
+                if ($token->expires_at && $token->expires_at->isPast()) {
+                    throw new AuthException(__('messages.auth.expired'), ErrorCode::AUTH_EXPIRED);
                 }
                 $user = User::query()->find($token->user_id);
                 if (! $user || ! $user->status->isNormal()) {
-                    throw AuthException::authRequired();
+                    throw new AuthException(__('messages.auth.required'), ErrorCode::AUTH_REQUIRED);
                 }
                 $this->limit('api:'.$user->id, 120);
                 Context::set(User::class, $user);

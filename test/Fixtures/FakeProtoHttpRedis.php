@@ -14,6 +14,8 @@ final class FakeProtoHttpRedis extends Redis
 
     public float $gameWriteDelay = 0;
 
+    public bool $failNextExpire = false;
+
     /** @var array<string, float> */
     private array $expires = [];
 
@@ -71,6 +73,19 @@ final class FakeProtoHttpRedis extends Redis
                 $this->expires[$key] = $this->now + $args[3] + 1;
                 $this->values[$args[1]] = $args[4];
                 $this->expires[$args[1]] = $this->now + $args[3];
+
+                return 1;
+            }
+            if (str_contains($script, "redis.call('expire'")) {
+                if ($this->failNextExpire) {
+                    $this->failNextExpire = false;
+
+                    throw new LogicException('Redis expire failed');
+                }
+                if ($current !== $owner) {
+                    return 0;
+                }
+                $this->expires[$key] = $this->now + (int) $args[2];
 
                 return 1;
             }

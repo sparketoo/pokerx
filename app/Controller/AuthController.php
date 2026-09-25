@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Controller;
 
+use App\Constants\ErrorCode;
 use App\Exception\AuthException;
 use App\Model\User;
 use App\Request\LoginRequest;
@@ -13,6 +14,7 @@ use Psr\Http\Message\ResponseInterface as JsonResponse;
 
 use function App\Support\now;
 use function Hyperf\Config\config;
+use function Hyperf\Translation\__;
 
 class AuthController extends ApiController
 {
@@ -23,7 +25,7 @@ class AuthController extends ApiController
         $twoFactorCode = $request->twoFactorCode();
         $user = User::query()->where('account', strtolower(trim($account)))->first();
         if (! $user || ! $user->status->isNormal() || ! password_verify($password, $user->password)) {
-            throw AuthException::authFailed();
+            throw new AuthException(__('messages.auth.failed'), ErrorCode::AUTH_FAILED);
         }
 
         $this->verifyCode($user, $twoFactorCode);

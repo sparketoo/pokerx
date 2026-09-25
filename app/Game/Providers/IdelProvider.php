@@ -4,68 +4,28 @@ declare(strict_types=1);
 
 namespace App\Game\Providers;
 
-use App\Constants\ErrorCode;
 use App\Enum\ActionEnum;
 use App\Enum\StageEnum;
-use App\Exception\GameException;
-use App\Exception\ProviderException;
-use App\Vo\Game\GameEventVo;
 use App\Vo\Game\GameVo;
 use App\Vo\Game\RequestActionResultVo;
 use Closure;
-use Swoole\Timer;
 
-use function Hyperf\Translation\__;
-
-final class MockProvider extends BaseProvider
+final class IdelProvider extends BaseProvider
 {
-    public function __construct(private readonly int $delayMs = 50, private readonly bool $failure = false) {}
-
-    /** @var array<string, int> */
-    private array $timers = [];
-
     public function requestAction(GameVo $game, Closure $callback): void
     {
-        if (isset($this->timers[$game->uuid])) {
-            $callback(RequestActionResultVo::failure(new GameException(__('messages.game.action_in_progress'), ErrorCode::REQUEST_ACTION_IN_PROGRESS)));
-
-            return;
-        }
-        $ms = max(1, $this->delayMs);
-        $this->timers[$game->uuid] = Timer::after($ms, function () use ($game, $callback) {
-            unset($this->timers[$game->uuid]);
-            if ($this->failure) {
-                $callback(RequestActionResultVo::failure(new ProviderException(__('messages.provider.failed'), ErrorCode::PROVIDER_FAILED, context: ['reason' => 'mock_failure'])));
-
-                return;
-            }
-            $callback($this->actionFor($game));
-        });
-    }
-
-    public function abort(GameEventVo $event): void
-    {
-        $this->stage($event);
-    }
-
-    public function over(GameEventVo $event): void
-    {
-        $this->stage($event);
-    }
-
-    public function stage(GameEventVo $event): void
-    {
-        $timer = $this->timers[$event->game->uuid] ?? null;
-        if ($timer === null) {
-            return;
-        }
-
-        Timer::clear($timer);
-        unset($this->timers[$event->game->uuid]);
+        $callback($this->actionFor($game));
     }
 
     private function actionFor(GameVo $game): RequestActionResultVo
     {
+        $hero = $game->hero();
+        foreach ($hero->events() as $event) {
+            if ($event->type->isAction()) {
+                return RequestActionResultVo::success(ActionEnum::FOLD, 0);
+            }
+        }
+
         $roundBets = [];
         $remainingStacks = [];
         foreach ($game->players as $player) {
@@ -85,14 +45,11 @@ final class MockProvider extends BaseProvider
 
                 continue;
             }
-            if (! $event->type->isAction()) {
+            if (! $event->type->isAction() || $event->player === null) {
                 continue;
             }
 
-            $uid = $event->payload['uid'] ?? null;
-            if (! is_string($uid) || ! array_key_exists($uid, $remainingStacks)) {
-                continue;
-            }
+            $uid = $event->player->uid;
             $action = ActionEnum::fromName($event->payload['action'] ?? null);
             if ($action === null || $action->isFold() || $action->isCheck()) {
                 continue;
@@ -104,14 +61,13 @@ final class MockProvider extends BaseProvider
             $remainingStacks[$uid] -= $paid;
         }
 
-        $heroUid = $game->hero()->uid;
         $highestRoundBet = $roundBets === [] ? 0 : max($roundBets);
-        $call = max(0, $highestRoundBet - $roundBets[$heroUid]);
-        $remainingStack = $remainingStacks[$heroUid];
-
+        $call = max(0, $highestRoundBet - $roundBets[$hero->uid]);
         if ($call === 0) {
             return RequestActionResultVo::success(ActionEnum::CHECK, 0);
         }
+
+        $remainingStack = $remainingStacks[$hero->uid];
         if ($call < $remainingStack) {
             return RequestActionResultVo::success(ActionEnum::CALL, $call);
         }

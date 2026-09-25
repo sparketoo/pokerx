@@ -30,7 +30,7 @@ final class CardVoTest extends TestCase
             new CardVo('1', CardSuitEnum::SPADES);
             self::fail('Invalid rank must be rejected');
         } catch (GameException $error) {
-            self::assertSame('card_invalid', $error->getErrorCode());
+            self::assertSame(1000, $error->getCode());
         }
     }
 }

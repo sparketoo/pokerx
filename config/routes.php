@@ -1,5 +1,6 @@
 <?php
 
+use App\Constants\ErrorCode;
 use App\Controller\AuthController;
 use App\Controller\Mine\EventsController;
 use App\Controller\Mine\GameConfigController;
@@ -10,7 +11,7 @@ use App\Controller\MineController;
 use App\Game\GameServer;
 use Hyperf\HttpServer\Router\Router;
 
-Router::get('/api/health', fn () => ['code' => 'success', 'message' => 'ok', 'data' => ['status' => 'ok']]);
+Router::get('/api/health', fn () => ['code' => ErrorCode::SUCCESS, 'message' => 'ok', 'data' => ['status' => 'ok']]);
 Router::post('/api/auth/login', [AuthController::class, 'login']);
 Router::post('/api/auth/logout', [AuthController::class, 'logout']);
 Router::get('/api/mine', [MineController::class, 'index']);

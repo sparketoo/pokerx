@@ -6,12 +6,18 @@ namespace Tests\Feature\Controller;
 
 use App\Controller\AuthController;
 use App\Exception\AuthException;
+use App\Middleware\Authenticate;
 use App\Request\LoginRequest;
 use App\Service\TotpService;
 use App\Service\UserTokenService;
 use Hyperf\DbConnection\Db;
+use Hyperf\HttpMessage\Server\Request as Psr7Request;
 use Hyperf\HttpServer\Request;
 use Hyperf\Validation\ValidationException;
+use Psr\Http\Message\ResponseInterface;
+use Psr\Http\Message\ServerRequestInterface;
+use Psr\Http\Server\RequestHandlerInterface;
+use Tests\Fixtures\FakeProtoHttpRedis;
 use Tests\Support\DatabaseTestCase;
 
 final class AuthControllerTest extends DatabaseTestCase
@@ -49,7 +55,7 @@ final class AuthControllerTest extends DatabaseTestCase
                 $this->call(new AuthController, 'login', LoginRequest::class, $credentials, 'POST', [], new UserTokenService);
                 self::fail('Invalid credentials must not create a token');
             } catch (AuthException $error) {
-                self::assertSame('auth_failed', $error->getErrorCode());
+                self::assertSame(2002, $error->getCode());
             }
         }
 
@@ -74,7 +80,7 @@ final class AuthControllerTest extends DatabaseTestCase
             ], 'POST', [], new UserTokenService);
             self::fail('A two-factor account must require its code');
         } catch (AuthException $error) {
-            self::assertSame('two_factor_required', $error->getErrorCode());
+            self::assertSame(2100, $error->getCode());
         }
         self::assertSame(0, Db::table('user_tokens')->count());
 
@@ -100,5 +106,30 @@ final class AuthControllerTest extends DatabaseTestCase
         self::assertNull((new UserTokenService)->findToken($first));
         self::assertNotNull((new UserTokenService)->findToken($second));
         self::assertSame(1, Db::table('user_tokens')->count());
+    }
+
+    public function test_expired_token_has_a_distinct_numeric_code(): void
+    {
+        $user = $this->user();
+        $plainToken = $this->token($user);
+        [$tokenId] = explode('|', $plainToken, 2);
+        Db::table('user_tokens')->where('id', (int) $tokenId)->update(['expires_at' => '2020-01-01 00:00:00']);
+
+        $request = new Psr7Request('GET', '/api/mine/profile', ['Authorization' => 'Bearer '.$plainToken]);
+        $handler = new class implements RequestHandlerInterface
+        {
+            public function handle(ServerRequestInterface $request): ResponseInterface
+            {
+                throw new \LogicException('Expired token reached the controller');
+            }
+        };
+
+        try {
+            (new Authenticate(new FakeProtoHttpRedis))->process($request, $handler);
+            self::fail('Expired token must be rejected');
+        } catch (AuthException $error) {
+            self::assertSame(2001, $error->getCode());
+            self::assertSame('登录已失效。', $error->getMessage());
+        }
     }
 }

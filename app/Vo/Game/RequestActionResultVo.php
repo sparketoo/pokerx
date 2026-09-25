@@ -4,10 +4,13 @@ declare(strict_types=1);
 
 namespace App\Vo\Game;
 
+use App\Constants\ErrorCode;
 use App\Enum\ActionEnum;
 use App\Exception\AppException;
 use App\Exception\GameException;
 use App\Vo\Vo;
+
+use function Hyperf\Translation\__;
 
 final class RequestActionResultVo extends Vo
 {
@@ -22,7 +25,7 @@ final class RequestActionResultVo extends Vo
     {
         if (! is_int($amount) || $amount < 0 || $amount > PHP_INT_MAX
             || (in_array($action, [ActionEnum::FOLD, ActionEnum::CHECK], true) && $amount !== 0)) {
-            throw GameException::actionAmountInvalid()->withDetails(['action' => $action->name, 'amount' => $amount]);
+            throw new GameException(__('messages.game.action_amount_invalid'), ErrorCode::BUSINESS_ERROR, ['action' => $action->name, 'amount' => $amount]);
         }
 
         return new self(true, $action, $amount);

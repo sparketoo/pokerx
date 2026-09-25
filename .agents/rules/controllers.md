@@ -45,7 +45,7 @@ Declare only route actions as public on concrete controllers; keep local helpers
 When adding or changing an HTTP route, verify its server, method, URI, and handler mapping with `php bin/hyperf.php describe:routes` or an HTTP feature test; assert route names only if the route actually declares one.
 
 ## Assert Internal Success Responses
-For changed successful API responses, assert HTTP 200, `code=success`, the expected `message`, and the endpoint-specific `data` shape and values.
+For changed successful API responses, assert HTTP 200, integer `code=0`, the expected `message`, and the endpoint-specific `data` shape and values.
 
 ## Assert Internal Failure Responses
 For expected business or validation failures, assert the HTTP status and `code` used by `AppExceptionHandler`, plus client-visible `details`; do not assume framework `HttpException` failures use the business status.

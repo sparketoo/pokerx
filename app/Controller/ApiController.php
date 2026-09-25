@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Controller;
 
+use App\Constants\ErrorCode;
 use App\Exception\AuthException;
 use App\Model\User;
 use App\Model\UserToken;
@@ -18,6 +19,7 @@ use Psr\Http\Message\ResponseInterface as JsonResponse;
 use UnitEnum;
 
 use function App\Support\di;
+use function Hyperf\Translation\__;
 
 abstract class ApiController extends AbstractController
 {
@@ -25,7 +27,7 @@ abstract class ApiController extends AbstractController
     {
         $user = Context::get(User::class);
         if (! $user instanceof User) {
-            throw AuthException::authRequired();
+            throw new AuthException(__('messages.auth.required'), ErrorCode::AUTH_REQUIRED);
         }
 
         return $user;
@@ -34,13 +36,13 @@ abstract class ApiController extends AbstractController
     protected function bearer(Request $request): string
     {
         return preg_match('/^Bearer (.+)$/D', $request->header('authorization') ?? '',
-            $matches) ? $matches[1] : throw AuthException::authRequired();
+            $matches) ? $matches[1] : throw new AuthException(__('messages.auth.required'), ErrorCode::AUTH_REQUIRED);
     }
 
     protected function success(mixed $data = null): JsonResponse
     {
         return di(ResponseInterface::class)->json([
-            'code' => 'success',
+            'code' => ErrorCode::SUCCESS,
             'message' => 'ok',
             'data' => $this->normalize($data),
         ]);
@@ -87,10 +89,10 @@ abstract class ApiController extends AbstractController
             return;
         }
         if (! $code) {
-            throw AuthException::twoFactorRequired();
+            throw new AuthException(__('messages.auth.two_factor_required'), ErrorCode::TWO_FACTOR_REQUIRED);
         }
         if (di(TotpService::class)->counter($user->two_factor_secret, $code) === null) {
-            throw AuthException::twoFactorInvalid();
+            throw new AuthException(__('messages.auth.two_factor_invalid'), ErrorCode::TWO_FACTOR_INVALID);
         }
     }
 

@@ -59,10 +59,11 @@ final class GameServiceTest extends DatabaseTestCase
         $game = $service->create(1, 'room-1#1', NetworkEnum::WE, 10, 100, 50, [
             ['uid' => 'hero', 'name' => 'Alice', 'seat' => 1, 'stack' => 1000, 'hero' => true],
             ['uid' => 'villain', 'name' => 'Bob', 'seat' => 2, 'stack' => 1000, 'hero' => false],
-        ], 1);
+        ], 1, '42');
 
         self::assertMatchesRegularExpression('/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/', $game->uuid);
         self::assertSame('room-1#1', $game->gameKey);
+        self::assertSame('42', $service->find($game->uuid)->clientId);
         self::assertSame($game->uuid, $service->find($game->uuid)->uuid);
         self::assertCount(1, $this->queue->pushed);
         self::assertInstanceOf(GameCloseJob::class, $this->queue->pushed[0]['job']);
@@ -85,7 +86,7 @@ final class GameServiceTest extends DatabaseTestCase
             (new GameService(new GameProviderManager, $redis))->create(1, 'table-42#1', NetworkEnum::WE, 0, 100, 50, $players, 1);
             self::fail('A second START must not create another live game');
         } catch (GameException $error) {
-            self::assertSame('game_already_exists', $error->getErrorCode());
+            self::assertSame(3000, $error->getCode());
         }
         self::assertSame($game->uuid, $service->find($game->uuid)->uuid);
         $otherUser = $service->create(2, 'table-42#1', NetworkEnum::WE, 0, 100, 50, $players, 1);
@@ -112,7 +113,7 @@ final class GameServiceTest extends DatabaseTestCase
             $service->create(1, 'table-42#1', NetworkEnum::WE, 0, 100, 50, $players, 1);
             self::fail('A saved game must prevent another START after Redis expiry');
         } catch (GameException $error) {
-            self::assertSame('game_already_exists', $error->getErrorCode());
+            self::assertSame(3000, $error->getCode());
         }
         self::assertSame(1, Db::table('games')->count());
         self::assertCount(1, $this->queue->pushed);
@@ -136,7 +137,7 @@ final class GameServiceTest extends DatabaseTestCase
             $service->create(1, 'table-42#1', NetworkEnum::WE, 0, 100, 50, $players, 1);
             self::fail('A still readable game must prevent another START');
         } catch (GameException $error) {
-            self::assertSame('game_already_exists', $error->getErrorCode());
+            self::assertSame(3000, $error->getCode());
         }
     }
 
@@ -173,7 +174,7 @@ final class GameServiceTest extends DatabaseTestCase
                 $service->find($uuid);
                 self::fail('Missing or invalid game data must be rejected');
             } catch (GameException $error) {
-                self::assertSame('game_uuid_not_found', $error->getErrorCode());
+                self::assertSame(3001, $error->getCode());
             }
         }
     }

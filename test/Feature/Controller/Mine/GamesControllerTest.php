@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Tests\Feature\Controller\Mine;
 
 use App\Controller\Mine\GamesController;
-use App\Exception\FoundationException;
+use App\Exception\BusinessException;
 use App\Request\Mine\Games\DetailRequest;
 use App\Request\Mine\Games\EventsRequest;
 use App\Request\Mine\Games\IndexRequest;
@@ -94,8 +94,8 @@ final class GamesControllerTest extends DatabaseTestCase
         try {
             $this->call(new GamesController, 'detail', DetailRequest::class, ['game_id' => '11111111-1111-4111-8111-000000000001']);
             self::fail('Other users\' games must be hidden');
-        } catch (FoundationException $error) {
-            self::assertSame('not_found', $error->getErrorCode());
+        } catch (BusinessException $error) {
+            self::assertSame(1002, $error->getCode());
         }
 
         $this->expectException(ValidationException::class);

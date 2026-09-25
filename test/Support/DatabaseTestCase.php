@@ -159,7 +159,7 @@ abstract class DatabaseTestCase extends TestCase
         $request = $this->request($requestClass, $input, $method, $headers);
         $response = $controller->{$action}($request, ...$services);
         $body = json_decode((string) $response->getBody(), true, 512, JSON_THROW_ON_ERROR);
-        Assert::assertSame('success', $body['code']);
+        Assert::assertSame(0, $body['code']);
 
         return $body['data'] ?? [];
     }

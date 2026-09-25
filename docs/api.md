@@ -238,12 +238,14 @@ HTTP 的通用错误码包括 `auth_failed`、`auth_required`、`two_factor_requ
 }
 ```
 
-| 字段 | 约束及含义                                                                                                                                                                                                             |
-| --- |-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `network` | 必填；`OK`、`WE`、`WPK` 或 `WPK_CLUB`                                                                                                                                                                                   |
-| `items` | 必填；1–9 项，不能重复 `key`；只修改提交的配置项                                                                                                                                                                                     |
-| `items[].key` | `insurance_default` 或 `insurance_outs_1` 至 `insurance_outs_8`                                                                                                                                                     |
-| `items[].value` | 仅接受 `InsuranceService::RATIO_MIN`（`MIN`，最低可买额）、`RATIO_MAX`（`MAX`，最高可买额）、`RATIO_1`（`1`，服务端报价中的保底额）、`RATIO_2`（`1/2`）、`RATIO_3`（`1/3`）、`RATIO_5`（`1/5`）、`RATIO_8`（`1/8`）；也可填 `null` 删除该配置项。旧值 `NONE`、`0`、`full`、十进制比例及数值类型无效 |
+| 字段 | 约束及含义 |
+| --- | --- |
+| `network` | 必填；`OK`、`WE`、`WPK` 或 `WPK_CLUB` |
+| `items` | 必填；1–13 项，不能重复 `key`；只修改提交的配置项 |
+| `items[].key` | `insurance_default`、`insurance_outs_1` 至 `insurance_outs_8`，或 `auto_bet_check_fold`、`auto_bet_bet_raise`、`auto_bet_call_all_in`、`auto_bet_insurance` |
+| `items[].value` | 保险键接受 `MIN`、`MAX`、`1`、`1/2`、`1/3`、`1/5`、`1/8`；自动下注键接受 0–10 秒的 `min-max` 字符串；`null` 删除对应配置。 |
+
+自动下注延迟的四个配置键分别对应过牌/弃牌、下注/加注、跟注/全押及保险。值为 `min-max` 秒，例如 `0-10`；两端均为 0–10 的整数，且 `min <= max`。未配置时客户端使用 2–5 秒。
 
 比例档按 `floor(pot × 比例 ÷ odds)` 计算原始投保额，然后限制在服务端报价的 `min` 与 `max` 内；`1` 使用报价中的 `breakeven`，`MAX` 使用 `max`，`MIN` 使用 `min`，即使 `min` 为 0 也返回 0。未设置具体 outs 档位时使用 `insurance_default`；两者都未设置时，若报价有效则使用 `min`。有效报价下返回的每个投保额都不低于 `min`。
 

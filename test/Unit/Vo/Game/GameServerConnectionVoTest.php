@@ -20,4 +20,14 @@ final class GameServerConnectionVoTest extends TestCase
         self::assertSame('zh-CN', (new GameServerConnectionVo(1, $user, $token))->locale);
         self::assertSame('en', (new GameServerConnectionVo(2, $user, $token, 'en'))->locale);
     }
+
+    public function test_connection_uses_authenticated_token_id_as_stable_client_id(): void
+    {
+        $user = new User;
+        $user->language = 'zh-CN';
+        $token = new UserToken;
+        $token->id = 42;
+
+        self::assertSame('42', (new GameServerConnectionVo(7, $user, $token))->clientId);
+    }
 }

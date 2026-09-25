@@ -1,16 +1,21 @@
 <?php
 
+declare(strict_types=1);
+
 namespace App\Vo\Game;
 
+use App\Constants\ErrorCode;
 use App\Enum\ActionEnum;
 use App\Enum\GameEventTypeEnum;
 use App\Enum\GameStatusEnum;
 use App\Enum\NetworkEnum;
 use App\Enum\StageEnum;
-use App\Exception\FoundationException;
+use App\Exception\BusinessException;
 use App\Exception\GameException;
 use App\Vo\Vo;
 use Hyperf\Collection\Collection;
+
+use function Hyperf\Translation\__;
 
 class GameVo extends Vo
 {
@@ -58,11 +63,12 @@ class GameVo extends Vo
         public readonly int $ante,
         array $players,
         public readonly int $buttonSeatNumber,
+        public readonly ?string $clientId = null,
     ) {
         $seats = array_column($players, 'seat');
         sort($seats, SORT_NUMERIC);
         if (count($seats) < 2 || ! in_array($buttonSeatNumber, $seats, true)) {
-            throw GameException::bigBlindNotFound();
+            throw new GameException(__('messages.game.big_blind_not_found'), ErrorCode::BUSINESS_ERROR);
         }
         $nextSeat = static function (int $seat) use ($seats): int {
             foreach ($seats as $candidate) {
@@ -89,7 +95,7 @@ class GameVo extends Vo
         }
 
         if ($this->players->isEmpty()) {
-            throw GameException::playersEmpty();
+            throw new GameException(__('messages.game.players_empty'), ErrorCode::BUSINESS_ERROR);
         }
         // 校验本人和大盲是否存在
         $this->hero();
@@ -119,7 +125,7 @@ class GameVo extends Vo
         /** @var GamePlayerVo|null $hero */
         $hero = $this->players->first(fn (GamePlayerVo $player) => $player->isHero);
         if (empty($hero)) {
-            throw GameException::heroNotFound();
+            throw new GameException(__('messages.game.hero_not_found'), ErrorCode::BUSINESS_ERROR);
         }
 
         return $hero;
@@ -135,7 +141,7 @@ class GameVo extends Vo
         /** @var GamePlayerVo|null $bb */
         $bb = $this->players->first(fn (GamePlayerVo $playerVo) => $playerVo->isBb());
         if (empty($bb)) {
-            throw GameException::bigBlindNotFound();
+            throw new GameException(__('messages.game.big_blind_not_found'), ErrorCode::BUSINESS_ERROR);
         }
 
         return $bb;
@@ -163,7 +169,7 @@ class GameVo extends Vo
     {
         $player = $this->player($uid);
         if (empty($player)) {
-            throw GameException::playerNotFound($uid);
+            throw new GameException(__('messages.game.player_not_found'), ErrorCode::BUSINESS_ERROR, ['name' => $uid]);
         }
 
         return $player;
@@ -187,7 +193,7 @@ class GameVo extends Vo
     ): GameEventVo {
 
         if (! $this->status->isOpen()) {
-            throw FoundationException::statusInvalid();
+            throw new BusinessException(__('messages.common.status_invalid'), ErrorCode::BUSINESS_ERROR);
         }
 
         $uid = $payload['uid'] ?? null;
@@ -200,11 +206,11 @@ class GameVo extends Vo
             // 补盲必须紧跟 START；重复或迟到事件会使底池与决策服务的事件顺序失真。
             $amount = $payload['amount'] ?? null;
             if ($this->events->contains(fn (GameEventVo $event) => ! $event->type->isPostBlind()) || ! is_int($amount) || $amount <= 0) {
-                throw GameException::eventInvalid();
+                throw new GameException(__('messages.game.event_invalid'), ErrorCode::EVENT_INVALID);
             }
             $player = $this->playerOrFail(is_string($uid) ? $uid : '');
             if ($player->postBlind > 0 || $amount > $player->stack - $player->ante - $player->blind) {
-                throw GameException::eventInvalid();
+                throw new GameException(__('messages.game.event_invalid'), ErrorCode::EVENT_INVALID);
             }
         }
         if ($type->isStraddleBlind()) {
@@ -213,7 +219,7 @@ class GameVo extends Vo
             $player = $this->playerOrFail(is_string($uid) ? $uid : '');
             if ($this->stage !== StageEnum::PREFLOP || ! is_int($amount) || $amount <= 0
                 || $amount > $player->stack - $player->total()) {
-                throw GameException::eventInvalid();
+                throw new GameException(__('messages.game.event_invalid'), ErrorCode::EVENT_INVALID);
             }
         }
         if ($type->isOver()) {
@@ -223,7 +229,7 @@ class GameVo extends Vo
                 $amount = $return['amount'] ?? null;
                 if (isset($seen[$returnPlayer->uid]) || ! is_int($amount) || $amount <= 0
                     || $amount > $returnPlayer->total() + $returnPlayer->returned) {
-                    throw GameException::eventInvalid();
+                    throw new GameException(__('messages.game.event_invalid'), ErrorCode::EVENT_INVALID);
                 }
                 $seen[$returnPlayer->uid] = true;
                 $return['uid'] = $returnPlayer->uid;

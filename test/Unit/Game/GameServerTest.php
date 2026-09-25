@@ -4,10 +4,14 @@ declare(strict_types=1);
 
 namespace Tests\Unit\Game;
 
+use App\Enum\ActionEnum;
 use App\Enum\NetworkEnum;
 use App\Game\GameProviderManager;
 use App\Game\GameServer;
+use App\Game\Providers\BaseProvider;
 use App\Game\Providers\MockProvider;
+use App\Game\Providers\ProtoProvider;
+use App\Game\Socket\ProtoWebSocketClient;
 use App\Model\User;
 use App\Model\UserToken;
 use App\Service\GameService;
@@ -15,20 +19,152 @@ use App\Service\InsuranceService;
 use App\Service\UserTokenService;
 use App\Vo\Game\GameServerConnectionVo;
 use App\Vo\Game\GameVo;
+use App\Vo\Game\RequestActionResultVo;
 use Hyperf\Context\ApplicationContext;
 use Hyperf\Validation\Contract\ValidatorFactoryInterface;
 use Hyperf\WebSocketServer\Sender;
+use Monolog\Handler\TestHandler;
+use Monolog\Logger;
 use Psr\Log\LoggerInterface;
 use ReflectionProperty;
 use RuntimeException;
+use Swoole\Coroutine;
+use Swoole\Coroutine\Http\Client;
 use Swoole\WebSocket\Frame;
 use Tests\Fixtures\FakeGameServerSender;
 use Tests\Fixtures\FakeProtoHttpRedis;
+use Tests\Fixtures\FakeProtoSocketRedis;
+use Tests\Fixtures\FakeWebSocketTransport;
 use Tests\Fixtures\GameVoFixture;
 use Tests\TestCase;
 
 final class GameServerTest extends TestCase
 {
+    public function test_first_message_waits_for_upstream_authentication(): void
+    {
+        \Swoole\Coroutine\run(function (): void {
+            [$server, $sender] = $this->newServer(false);
+            $user = new User(['language' => 'zh-CN']);
+            $user->id = 1;
+            $token = new UserToken;
+            $token->id = 42;
+            $connection = new GameServerConnectionVo(7, $user, $token);
+            $connection->ready = false;
+            (new ReflectionProperty(GameServer::class, 'connections'))->setValue($server, [7 => $connection]);
+
+            Coroutine::create(static function () use ($connection): void {
+                Coroutine::sleep(0.1);
+                $connection->ready = true;
+            });
+            $this->send($server, 7, ['id' => 'early-ping', 'type' => 'PING', 'timestamp' => $this->now()]);
+
+            self::assertSame('PING.ACK', $sender->messages[0]['type']);
+            self::assertSame([], $sender->disconnected);
+        });
+    }
+
+    public function test_other_client_cannot_change_or_read_a_proto_socket_game(): void
+    {
+        [$server, $sender, $providers, $redis] = $this->newServer(false);
+        $game = GameVoFixture::headsUp(clientId: '42');
+        $redis->setex('game:'.$game->uuid, 3600, serialize($game));
+        $providers->extend('proto', static fn (): ProtoProvider => new ProtoProvider(
+            ['url' => 'ws://proto.test/', 'token' => 'proto-secret'], new FakeProtoSocketRedis,
+        ));
+        $user = new User(['language' => 'zh-CN']);
+        $user->id = 1;
+        $token = new UserToken;
+        $token->id = 43;
+        (new ReflectionProperty(GameServer::class, 'connections'))->setValue($server, [
+            1 => new GameServerConnectionVo(1, $user, $token),
+        ]);
+
+        foreach ([
+            ['type' => 'ACTION', 'payload' => ['game_uuid' => $game->uuid, 'uid' => 'hero', 'action' => 'CALL', 'amount' => 50]],
+            ['type' => 'ABORT', 'payload' => ['game_uuid' => $game->uuid]],
+            ['type' => 'REQUEST_INSURANCE', 'payload' => ['game_uuid' => $game->uuid, 'stage' => 'FLOP', 'outs' => 1, 'pot' => 100, 'odds' => 2, 'min' => 1, 'max' => 10, 'breakeven' => 5]],
+        ] as $index => $request) {
+            $this->send($server, 1, [
+                'id' => 'foreign-'.$index,
+                'type' => $request['type'],
+                'timestamp' => $this->now(),
+                'payload' => $request['payload'],
+            ]);
+            self::assertSame(3001, $sender->messages[$index]['payload']['code']);
+        }
+
+        $saved = unserialize($redis->get('game:'.$game->uuid));
+        self::assertInstanceOf(GameVo::class, $saved);
+        self::assertSame(0, $saved->events->count());
+    }
+
+    public function test_closing_downstream_fd_closes_its_proto_socket_client(): void
+    {
+        \Swoole\Coroutine\run(function (): void {
+            [$server, , $providers] = $this->newServer(false);
+            $redis = new FakeProtoSocketRedis;
+            $socket = new FakeWebSocketTransport;
+            $socket->receive('{"result":true,"sessionId":"session-42"}');
+            $options = ['url' => 'ws://proto.test/', 'token' => 'proto-secret'];
+            $provider = new ProtoProvider($options, $redis);
+            $client = new ProtoWebSocketClient(1, '42', $options, $redis, static fn (): Client => $socket);
+            $client->connect();
+            (new ReflectionProperty(ProtoProvider::class, 'clients'))->setValue($provider, [
+                '1:42' => ['fd' => 7, 'client' => $client],
+            ]);
+            $providers->extend('proto', static fn (): ProtoProvider => $provider);
+            $user = new User(['language' => 'zh-CN']);
+            $user->id = 1;
+            $token = new UserToken;
+            $token->id = 42;
+            (new ReflectionProperty(GameServer::class, 'connections'))->setValue($server, [
+                7 => new GameServerConnectionVo(7, $user, $token),
+            ]);
+
+            $server->onClose(null, 7, 0);
+
+            self::assertTrue($socket->closed);
+        });
+    }
+
+    public function test_repeated_action_requests_have_distinct_client_message_ids_in_logs(): void
+    {
+        $handler = new TestHandler;
+        $logger = new Logger('game-server-test');
+        $logger->pushHandler($handler);
+        [$server, $sender, $providers, $redis] = $this->newServer(true, $logger);
+        $game = GameVoFixture::headsUp();
+        $redis->setex('game:'.$game->uuid, 3600, serialize($game));
+        $providers->extend('proto', static fn (): BaseProvider => new class extends BaseProvider
+        {
+            public function requestAction(GameVo $game, \Closure $callback): void
+            {
+                $callback(RequestActionResultVo::success(ActionEnum::CHECK, 0));
+            }
+        });
+
+        foreach (['client-first', 'client-second'] as $messageId) {
+            $this->send($server, 1, [
+                'id' => $messageId,
+                'type' => 'REQUEST_ACTION',
+                'timestamp' => $this->now(),
+                'payload' => ['game_uuid' => $game->uuid],
+            ]);
+        }
+
+        self::assertCount(2, $sender->messages);
+        $requested = array_values(array_filter($handler->getRecords(), static fn ($record): bool => $record->message === 'Poker action requested'));
+        $answered = array_values(array_filter($handler->getRecords(), static fn ($record): bool => $record->message === 'Poker action answered'));
+        self::assertCount(2, $requested);
+        self::assertCount(2, $answered);
+        self::assertSame(['client-first', 'client-second'], array_column(array_map(
+            static fn ($record): array => $record->context,
+            $requested,
+        ), 'message_id'));
+        self::assertSame($game->uuid, $requested[0]->context['game_id']);
+        self::assertSame('client-second', $answered[1]->context['message_id']);
+    }
+
     public function test_invalid_connection_can_receive_auth_error_without_recursion(): void
     {
         [$server, $sender] = $this->newServer(false);
@@ -37,7 +173,7 @@ final class GameServerTest extends TestCase
             $this->send($server, 2, ['id' => 'missing-auth', 'type' => 'PING', 'timestamp' => $this->now()]);
         });
 
-        self::assertSame('auth_required', $sender->messages[0]['payload']['code']);
+        self::assertSame(2000, $sender->messages[0]['payload']['code']);
         self::assertSame('missing-auth', $sender->messages[0]['reply_to']);
         self::assertSame([2], $sender->disconnected);
         \Swoole\Coroutine\run(static function () use ($server): void {
@@ -51,7 +187,7 @@ final class GameServerTest extends TestCase
 
         $this->sendRaw($server, 1, '{invalid');
 
-        self::assertSame('event_invalid', $sender->messages[0]['payload']['code']);
+        self::assertSame(3002, $sender->messages[0]['payload']['code']);
         self::assertNull($sender->messages[0]['reply_to']);
     }
 
@@ -62,9 +198,9 @@ final class GameServerTest extends TestCase
         $this->send($server, 1, ['id' => 7, 'type' => 'PING', 'timestamp' => $this->now()]);
         $this->send($server, 1, ['id' => 'bad-payload', 'type' => 'START', 'timestamp' => $this->now(), 'payload' => 'invalid']);
 
-        self::assertSame('event_invalid', $sender->messages[0]['payload']['code']);
+        self::assertSame(3002, $sender->messages[0]['payload']['code']);
         self::assertNull($sender->messages[0]['reply_to']);
-        self::assertSame('event_invalid', $sender->messages[1]['payload']['code']);
+        self::assertSame(3002, $sender->messages[1]['payload']['code']);
         self::assertSame('bad-payload', $sender->messages[1]['reply_to']);
     }
 
@@ -82,13 +218,13 @@ final class GameServerTest extends TestCase
             'payload' => ['game_uuid' => $game->uuid],
         ]);
 
-        self::assertSame('server_error', $sender->messages[0]['payload']['code']);
+        self::assertSame(5000, $sender->messages[0]['payload']['code']);
         self::assertSame('服务暂不可用', $sender->messages[0]['payload']['message']);
         self::assertSame('action-1', $sender->messages[0]['reply_to']);
     }
 
     /** @return array{GameServer, FakeGameServerSender, GameProviderManager, FakeProtoHttpRedis} */
-    private function newServer(bool $connected = true): array
+    private function newServer(bool $connected = true, ?LoggerInterface $logger = null): array
     {
         $sender = new FakeGameServerSender;
         $providers = new GameProviderManager;
@@ -101,7 +237,7 @@ final class GameServerTest extends TestCase
             new GameService($providers, $redis),
             $container->get(InsuranceService::class),
             $container->get(ValidatorFactoryInterface::class),
-            $container->get(LoggerInterface::class),
+            $logger ?? $container->get(LoggerInterface::class),
         );
         if ($connected) {
             $connections = [1 => new GameServerConnectionVo(1, new User(['language' => 'zh-CN']), new UserToken)];
@@ -185,7 +321,7 @@ final class GameServerTest extends TestCase
         $timestamp = (int) floor(microtime(true) * 1000);
         $nonInteger = $send(1, 'ping-string', 'PING', (string) ($timestamp + 100));
         self::assertSame('error', $nonInteger['type']);
-        self::assertSame('event_invalid', $nonInteger['payload']['code']);
+        self::assertSame(3002, $nonInteger['payload']['code']);
 
         $first = $send(1, 'ping-1', 'PING', $timestamp);
         self::assertSame('PING.ACK', $first['type']);
@@ -194,11 +330,11 @@ final class GameServerTest extends TestCase
 
         $invalidStart = $send(1, 'start-1', 'START', $timestamp + 1, []);
         self::assertSame('error', $invalidStart['type']);
-        self::assertSame('event_invalid', $invalidStart['payload']['code']);
+        self::assertSame(3002, $invalidStart['payload']['code']);
 
         $older = $send(1, 'ping-old', 'PING', $timestamp);
         self::assertSame('error', $older['type']);
-        self::assertSame('event_invalid', $older['payload']['code']);
+        self::assertSame(3002, $older['payload']['code']);
         self::assertSame('ping-old', $older['reply_to']);
 
         $olderAgain = $send(1, 'ping-old-again', 'PING', $timestamp);
@@ -255,19 +391,19 @@ final class GameServerTest extends TestCase
         };
 
         $payload = ['game_uuid' => $game->uuid, 'uid' => 'OTHER', 'amount' => 2];
-        self::assertSame('event_invalid', $send('invalid-amount', [...$payload, 'amount' => '2'])['payload']['code']);
-        self::assertSame('player_not_found', $send('unknown', [...$payload, 'uid' => 'absent'])['payload']['code']);
+        self::assertSame(3002, $send('invalid-amount', [...$payload, 'amount' => '2'])['payload']['code']);
+        self::assertSame(1000, $send('unknown', [...$payload, 'uid' => 'absent'])['payload']['code']);
         $accepted = $send('valid', $payload);
         self::assertSame('POST_BLIND.ACK', $accepted['type']);
         self::assertSame('valid', $accepted['reply_to']);
         self::assertSame([], $accepted['payload']);
         self::assertSame(2, $service->find($game->uuid)->playerOrFail('other')->postBlind);
-        self::assertSame('event_invalid', $send('duplicate', $payload)['payload']['code']);
+        self::assertSame(3002, $send('duplicate', $payload)['payload']['code']);
         self::assertCount(1, $service->find($game->uuid)->events);
         self::assertSame('STAGE.ACK', $send('preflop', [
             'game_uuid' => $game->uuid, 'stage' => 'PREFLOP', 'cards' => [],
         ], 'STAGE')['type']);
-        self::assertSame('event_invalid', $send('bad-straddle', [
+        self::assertSame(3002, $send('bad-straddle', [
             'game_uuid' => $game->uuid, 'uid' => 'OTHER', 'amount' => '4',
         ], 'STRADDLE_BLIND')['payload']['code']);
         $straddle = $send('valid-straddle', [

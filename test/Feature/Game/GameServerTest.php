@@ -95,6 +95,7 @@ final class GameServerTest extends DatabaseTestCase
     {
         $sender = new FakeGameServerSender;
         $providers = new GameProviderManager;
+        $providers->extend($providers->getDefaultProvider(), static fn (): MockProvider => new MockProvider(1));
         $container = ApplicationContext::getContainer();
         $gameServer = new GameServer(
             $sender,
@@ -269,14 +270,14 @@ final class GameServerTest extends DatabaseTestCase
             ];
 
             $invalidStart = $send('START', ['network' => 'WE']);
-            self::assertSame('event_invalid', $invalidStart['payload']['code'], json_encode($invalidStart, JSON_THROW_ON_ERROR));
+            self::assertSame(3002, $invalidStart['payload']['code'], json_encode($invalidStart, JSON_THROW_ON_ERROR));
             self::assertArrayHasKey('game_key', $invalidStart['payload']['details']);
             $tooLongKey = $send('START', [...$start, 'game_key' => str_repeat('x', 33)]);
-            self::assertSame('event_invalid', $tooLongKey['payload']['code']);
+            self::assertSame(3002, $tooLongKey['payload']['code']);
             self::assertArrayHasKey('game_key', $tooLongKey['payload']['details']);
             $spacedKey = $send('START', [...$start, 'game_key' => 'table-42#1 ']);
             self::assertSame('error', $spacedKey['type']);
-            self::assertSame('event_invalid', $spacedKey['payload']['code']);
+            self::assertSame(3002, $spacedKey['payload']['code']);
             self::assertArrayHasKey('game_key', $spacedKey['payload']['details']);
             foreach (['hero-1', '12345678901234567', 123] as $invalidUid) {
                 $reply = $send('START', [...$start, 'players' => [
@@ -284,7 +285,7 @@ final class GameServerTest extends DatabaseTestCase
                     $start['players'][1],
                 ]]);
                 self::assertSame('error', $reply['type'], json_encode($reply, JSON_THROW_ON_ERROR));
-                self::assertSame('event_invalid', $reply['payload']['code'], json_encode($reply, JSON_THROW_ON_ERROR));
+                self::assertSame(3002, $reply['payload']['code'], json_encode($reply, JSON_THROW_ON_ERROR));
                 self::assertArrayHasKey('players.0.uid', $reply['payload']['details']);
             }
             $longName = $send('START', [...$start, 'players' => [
@@ -292,26 +293,26 @@ final class GameServerTest extends DatabaseTestCase
                 $start['players'][1],
             ]]);
             self::assertSame('error', $longName['type'], json_encode($longName, JSON_THROW_ON_ERROR));
-            self::assertSame('event_invalid', $longName['payload']['code'], json_encode($longName, JSON_THROW_ON_ERROR));
+            self::assertSame(3002, $longName['payload']['code'], json_encode($longName, JSON_THROW_ON_ERROR));
             self::assertArrayHasKey('players.0.name', $longName['payload']['details']);
             $duplicateUid = $send('START', [...$start, 'players' => [
                 $start['players'][0],
                 [...$start['players'][1], 'uid' => 'aA12345678901234'],
             ]]);
-            self::assertSame('event_invalid', $duplicateUid['payload']['code']);
+            self::assertSame(3002, $duplicateUid['payload']['code']);
             self::assertArrayHasKey('players.1.uid', $duplicateUid['payload']['details']);
             $onePlayer = $send('START', [...$start, 'players' => [$start['players'][0]]]);
-            self::assertSame('event_invalid', $onePlayer['payload']['code'], json_encode($onePlayer, JSON_THROW_ON_ERROR));
+            self::assertSame(3002, $onePlayer['payload']['code'], json_encode($onePlayer, JSON_THROW_ON_ERROR));
             $noHero = $send('START', [...$start, 'players' => [
                 [...$start['players'][0], 'hero' => false],
                 $start['players'][1],
             ]]);
-            self::assertSame('hero_not_found', $noHero['payload']['code'], json_encode($noHero, JSON_THROW_ON_ERROR));
+            self::assertSame(1000, $noHero['payload']['code'], json_encode($noHero, JSON_THROW_ON_ERROR));
             $started = $send('START', $start);
             self::assertSame('START.ACK', $started['type']);
             $gameUuid = $started['payload']['game_uuid'];
             self::assertMatchesRegularExpression('/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/', $gameUuid);
-            self::assertSame('game_already_exists', $send('START', $start)['payload']['code']);
+            self::assertSame(3000, $send('START', $start)['payload']['code']);
             $providers->extend($providers->getDefaultProvider(), static fn (): BaseProvider => new class extends BaseProvider
             {
                 public function start(GameVo $game): void
@@ -322,11 +323,11 @@ final class GameServerTest extends DatabaseTestCase
                 public function requestAction(GameVo $game, Closure $callback): void {}
             });
             $failedStart = $send('START', [...$start, 'game_key' => 'retry-after-error']);
-            self::assertSame('server_error', $failedStart['payload']['code']);
+            self::assertSame(5000, $failedStart['payload']['code']);
             $providers->extend($providers->getDefaultProvider(), static fn (): MockProvider => new MockProvider(1));
             self::assertSame('START.ACK', $send('START', [...$start, 'game_key' => 'retry-after-error'])['type']);
 
-            self::assertSame('event_invalid', $send('STAGE', [
+            self::assertSame(3002, $send('STAGE', [
                 'game_uuid' => $gameUuid, 'stage' => 'FLOP', 'cards' => ['As', 'Kh'],
             ])['payload']['code']);
             $stage = $send('STAGE', [
@@ -343,7 +344,7 @@ final class GameServerTest extends DatabaseTestCase
                 self::assertSame('STAGE.ACK', $streetReply['type']);
                 self::assertSame([], $streetReply['payload']);
             }
-            self::assertSame('event_invalid', $send('DEALT', [
+            self::assertSame(3002, $send('DEALT', [
                 'game_uuid' => $gameUuid, 'cards' => ['As'],
             ])['payload']['code']);
             $dealt = $send('DEALT', [
@@ -354,9 +355,9 @@ final class GameServerTest extends DatabaseTestCase
             $invalidActionUid = $send('ACTION', [
                 'game_uuid' => $gameUuid, 'uid' => 'villain-1', 'action' => 'CHECK', 'amount' => 0,
             ]);
-            self::assertSame('event_invalid', $invalidActionUid['payload']['code']);
+            self::assertSame(3002, $invalidActionUid['payload']['code']);
             self::assertArrayHasKey('uid', $invalidActionUid['payload']['details']);
-            self::assertSame('event_invalid', $send('ACTION', [
+            self::assertSame(3002, $send('ACTION', [
                 'game_uuid' => $gameUuid, 'uid' => 'Bb2002', 'action' => 'CHECK', 'amount' => '0',
             ])['payload']['code']);
             $acted = $send('ACTION', [
@@ -367,9 +368,9 @@ final class GameServerTest extends DatabaseTestCase
             $invalidShowUid = $send('SHOW', [
                 'game_uuid' => $gameUuid, 'uid' => 'villain-1', 'cards' => ['Qs', 'Qh'],
             ]);
-            self::assertSame('event_invalid', $invalidShowUid['payload']['code']);
+            self::assertSame(3002, $invalidShowUid['payload']['code']);
             self::assertArrayHasKey('uid', $invalidShowUid['payload']['details']);
-            self::assertSame('event_invalid', $send('SHOW', [
+            self::assertSame(3002, $send('SHOW', [
                 'game_uuid' => $gameUuid, 'uid' => 'Bb2002', 'cards' => ['Qs'],
             ])['payload']['code']);
             $shown = $send('SHOW', [
@@ -377,15 +378,15 @@ final class GameServerTest extends DatabaseTestCase
             ]);
             self::assertSame('SHOW.ACK', $shown['type']);
             self::assertSame([], $shown['payload']);
-            self::assertSame('event_invalid', $send('REQUEST_ACTION')['payload']['code']);
+            self::assertSame(3002, $send('REQUEST_ACTION')['payload']['code']);
             $action = $send('REQUEST_ACTION', ['game_uuid' => $gameUuid]);
             self::assertSame('REQUEST_ACTION.ACK', $action['type']);
             self::assertSame(['game_uuid' => $gameUuid, 'action' => 'CHECK', 'amount' => 0], $action['payload']);
             $providers->extend($providers->getDefaultProvider(), static fn (): MockProvider => new MockProvider(1, true));
             $failedAction = $send('REQUEST_ACTION', ['game_uuid' => $gameUuid]);
             self::assertSame('error', $failedAction['type']);
-            self::assertSame('provider_failed', $failedAction['payload']['code']);
-            self::assertSame('event_invalid', $send('OVER', ['game_uuid' => $gameUuid])['payload']['code']);
+            self::assertSame(4001, $failedAction['payload']['code']);
+            self::assertSame(3002, $send('OVER', ['game_uuid' => $gameUuid])['payload']['code']);
             $over = $send('OVER', [
                 'game_uuid' => $gameUuid, 'winners' => [['uid' => 'aA12345678901234', 'amount' => 200]],
                 'shown' => [['uid' => 'aA12345678901234', 'cards' => ['As', 'Kh']]],
@@ -401,17 +402,17 @@ final class GameServerTest extends DatabaseTestCase
                     'winners' => [['uid' => 'Aa12345678901234', 'amount' => 200]],
                     ...$invalidResult,
                 ]);
-                self::assertSame('event_invalid', $invalidOverUid['payload']['code']);
+                self::assertSame(3002, $invalidOverUid['payload']['code']);
             }
-            self::assertSame('status_invalid', $send('ACTION', [
+            self::assertSame(1000, $send('ACTION', [
                 'game_uuid' => $gameUuid, 'uid' => 'Aa12345678901234', 'action' => 'CHECK', 'amount' => 0,
             ])['payload']['code']);
             $secondGame = $send('START', [...$start, 'game_key' => 'table-43#1'])['payload']['game_uuid'];
-            self::assertSame('event_invalid', $send('ABORT')['payload']['code']);
+            self::assertSame(3002, $send('ABORT')['payload']['code']);
             $abort = $send('ABORT', ['game_uuid' => $secondGame]);
             self::assertSame('ABORT.ACK', $abort['type'], json_encode($abort, JSON_THROW_ON_ERROR));
             self::assertSame([], $abort['payload']);
-            self::assertSame('event_type_invalid', $send('request_action')['payload']['code']);
+            self::assertSame(3002, $send('request_action')['payload']['code']);
         } finally {
             $container->set(DriverFactory::class, $originalDriverFactory);
             Mockery::close();
@@ -494,7 +495,7 @@ final class GameServerTest extends DatabaseTestCase
 
         self::assertSame('error', $reply['type']);
         self::assertSame('insurance-1', $reply['reply_to']);
-        self::assertSame('event_invalid', $reply['payload']['code']);
+        self::assertSame(3002, $reply['payload']['code']);
         self::assertArrayHasKey('breakeven', $reply['payload']['details']);
     }
 
@@ -554,6 +555,7 @@ final class GameServerTest extends DatabaseTestCase
         $redis = new FakeProtoHttpRedis;
         $redis->setex('game:'.$game->uuid, 3600, serialize($game));
         $providers = new GameProviderManager;
+        $providers->extend($providers->getDefaultProvider(), static fn (): MockProvider => new MockProvider(1));
         $container = ApplicationContext::getContainer();
         $server = new GameServer(
             $sender,

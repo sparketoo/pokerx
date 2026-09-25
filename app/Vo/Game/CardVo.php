@@ -1,10 +1,15 @@
 <?php
 
+declare(strict_types=1);
+
 namespace App\Vo\Game;
 
+use App\Constants\ErrorCode;
 use App\Enum\CardSuitEnum;
 use App\Exception\GameException;
 use App\Vo\Vo;
+
+use function Hyperf\Translation\__;
 
 class CardVo extends Vo
 {
@@ -32,7 +37,7 @@ class CardVo extends Vo
         public readonly CardSuitEnum $suit,
     ) {
         if (! in_array($this->number, self::$numbers)) {
-            throw GameException::cardInvalid($this->number);
+            throw new GameException(__('messages.game.card_invalid'), ErrorCode::BUSINESS_ERROR);
         }
     }
 
