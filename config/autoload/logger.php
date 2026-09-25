@@ -26,7 +26,7 @@ return [
                 'class' => StreamHandler::class,
                 'constructor' => [
                     'stream' => env('LOG_OUTPUT', dirname(__DIR__, 2).'/runtime/logs/hyperf.log'),
-                    'level' => Level::Info,
+                    'level' => Level::Debug,
                 ],
             ],
             'formatter' => [
