@@ -5,7 +5,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: pokerx:v1.0.0
+    image: pokerx:v1.0.5
     restart: unless-stopped
     environment:
       APP_NAME: ${APP_NAME:-PokerX}
