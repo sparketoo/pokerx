@@ -32,6 +32,7 @@ return [
         'players_empty' => 'The game has no players.',
     ],
     'provider' => [
+        'request_timeout' => 'Request timeout。',
         'unavailable' => 'The decision service is unavailable.',
         'failed' => 'The decision service failed to process the request.',
     ],

@@ -40,5 +40,7 @@ final class ErrorCode
 
     public const int PROVIDER_FAILED = 4001;
 
+    public const int PROVIDER_REQUEST_TIMEOUT = 4002;
+
     public const int SERVER_ERROR = 5000;
 }

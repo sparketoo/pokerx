@@ -117,7 +117,7 @@ final class ProtoWebSocketClient extends WebSocketClient
                 throw $response;
             }
             if (! is_array($response)) {
-                throw new ProviderException(__('messages.provider.unavailable', [], $this->locale), ErrorCode::PROVIDER_UNAVAILABLE, context: ['reason' => 'action_timeout', 'game_id' => $gameId]);
+                throw new ProviderException(__('messages.provider.request_timeout', [], $this->locale), ErrorCode::PROVIDER_REQUEST_TIMEOUT, context: ['reason' => 'action_timeout', 'game_id' => $gameId]);
             }
 
             return $response;

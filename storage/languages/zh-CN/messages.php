@@ -32,6 +32,7 @@ return [
         'players_empty' => '牌局没有玩家。',
     ],
     'provider' => [
+        'request_timeout' => '请求决策超时。',
         'unavailable' => '决策服务暂不可用。',
         'failed' => '决策服务处理失败。',
     ],
