@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Fixtures;
 
+use Closure;
 use Swoole\Coroutine\Channel;
 use Swoole\Coroutine\Http\Client;
 use Swoole\WebSocket\Frame;
@@ -19,6 +20,9 @@ final class FakeWebSocketTransport extends Client
     public bool $closed = false;
 
     public string $path = '';
+
+    /** @var null|Closure(mixed, int): void */
+    public ?Closure $onPush = null;
 
     private Channel $incoming;
 
@@ -56,6 +60,10 @@ final class FakeWebSocketTransport extends Client
             return false;
         }
         $this->sent[] = ['data' => $data, 'opcode' => $opcode];
+
+        if (! $this->closed && $this->onPush !== null) {
+            ($this->onPush)($data, $opcode);
+        }
 
         return ! $this->closed;
     }

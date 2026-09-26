@@ -52,7 +52,7 @@ final class GameService
         int $smallBlind,
         array $players,
         int $buttonSeatNumber,
-        int $tokenId,
+        string $clientId,
     ): GameVo {
         $uuid = Str::uuid()->toString();
         $game = new GameVo(
@@ -65,7 +65,7 @@ final class GameService
             $ante,
             $players,
             $buttonSeatNumber,
-            $tokenId,
+            $clientId,
         );
         $existsKey = 'game:'.$userId.':'.$network->name.':'.$gameKey;
         $exists = $this->redis->get($existsKey);
@@ -97,6 +97,18 @@ final class GameService
         return $game;
     }
 
+    public function findForClient(string $uuid, int $userId, string $clientId): GameVo
+    {
+        $game = $this->find($uuid);
+        if ($game->userId !== $userId
+            || ! array_key_exists('clientId', get_object_vars($game))
+            || $game->clientId !== $clientId) {
+            throw new GameException(__('messages.game.not_found'), ErrorCode::GAME_NOT_FOUND, ['uuid' => $uuid]);
+        }
+
+        return $game;
+    }
+
     public function save(GameVo $game): void
     {
         $this->redis->setex('game:'.$game->uuid, 3600, serialize($game));
@@ -113,9 +125,15 @@ final class GameService
      *
      * @throws GameException
      */
-    public function event(string $uuid, GameEventTypeEnum $type, array $payload, int $timestamp): GameEventVo
-    {
-        $game = $this->find($uuid);
+    public function event(
+        string $uuid,
+        GameEventTypeEnum $type,
+        array $payload,
+        int $timestamp,
+        int $userId,
+        string $clientId,
+    ): GameEventVo {
+        $game = $this->findForClient($uuid, $userId, $clientId);
         $event = $game->event(
             $type,
             $payload,

@@ -9,7 +9,7 @@
 | 通道 | 地址 | 格式 | 认证 |
 | --- | --- | --- | --- |
 | HTTP API | 部署方提供的 HTTP(S) 地址下的 `/api/*` | JSON；GET 参数放在查询字符串，POST 参数放在 JSON 请求体 | 除登录和健康检查外，`Authorization: Bearer <token>` |
-| GameServer | 部署方提供的 WebSocket(S) 地址下的 `/` | UTF-8 JSON 文本帧 | 连接 URL 的 `token` 查询参数，例如 `wss://<host>/?token=<token>` |
+| GameServer | 部署方提供的 WebSocket(S) 地址下的 `/` | UTF-8 JSON 文本帧 | 连接 URL 的 `token` 查询参数；重连原客户端时还需附带上次 `ACCEPT` 返回的 `client_id` |
 
 登录返回的 `token` 形如 `<令牌记录 ID>|<密钥>`。令牌默认在签发后 30 天过期；退出登录、修改密码、确认或取消两步验证后，相关令牌会失效。令牌应作为完整字符串传递。WebSocket 可附加 `locale` 查询参数设置错误消息语言，例如 `?token=...&locale=en-US`。
 
@@ -255,12 +255,14 @@ HTTP 的通用错误码包括 `auth_failed`、`auth_required`、`two_factor_requ
 
 ### 3.1 连接与消息信封
 
-连接 `/` 时在 URL 查询参数中携带登录令牌，例如 `wss://<game-host>/?token=12%7C<secret>`。无令牌、无效令牌、过期令牌或被禁用的用户无法建立可用会话；这里没有额外的 JSON 登录消息或 `sessionId`。令牌认证成功后，服务端主动发送一条 `ACCEPT` 事件表示连接可用；客户端收到它即可开始发送业务消息，无需先发送 `PING` 等待确认。认证失败时连接会断开，不发送 `ACCEPT`。随后双方使用 UTF-8 JSON 文本帧通信。
+连接 `/` 时在 URL 查询参数中携带登录令牌，例如 `wss://<game-host>/?token=12%7C<secret>`。无令牌、无效令牌、过期令牌或被禁用的用户无法建立可用会话；这里没有额外的 JSON 登录消息。每个独立的客户端连接首次建立时不传 `client_id`，服务端在 `ACCEPT.payload.client_id` 中签发一个不透明的客户端标识。客户端应分别保存每条独立连接的标识（包括同一用户打开的不同页面）；原连接断开后重连时，在查询参数中带回对应的 `client_id`，例如 `?token=...&client_id=...`（须 URL 编码）。服务端校验标识属于当前登录用户，为每条 WebSocket 建立新的上游连接，并尝试用该标识对应的上游 `sessionId` 恢复会话。即使多条连接使用同一个登录令牌，它们也各有自己的 `client_id`、上游连接和牌局；登录令牌不会用作客户端标识。客户端不直接发送上游 `sessionId`。
+
+认证及上游连接成功后，服务端主动发送 `ACCEPT` 表示连接可用；客户端收到后即可发送业务消息，无需先发送 `PING` 等待确认。失败时连接会断开，不发送 `ACCEPT`。同一个 `client_id` 不能同时用于两条活跃连接；如果重连早于旧连接的清理完成，客户端应保留原 `client_id` 并稍后重试，不要改为不带标识重新连接原牌局。随后双方使用 UTF-8 JSON 文本帧通信。
 
 认证成功后的首条服务端消息示例：
 
 ```json
-{"id":"server-generated-id","type":"ACCEPT","timestamp":1790136000000,"reply_to":null,"payload":[]}
+{"id":"server-generated-id","type":"ACCEPT","timestamp":1790136000000,"reply_to":null,"payload":{"client_id":"server-issued-id"}}
 ```
 
 客户端消息信封格式如下。此处的空 `payload` 仅用于展示信封结构；实际发送 `START` 时须填入 3.2 节规定的字段。
@@ -296,7 +298,7 @@ HTTP 的通用错误码包括 `auth_failed`、`auth_required`、`two_factor_requ
 }
 ```
 
-`id` 为服务端生成的消息 ID；应答消息的 `reply_to` 对应客户端的 `id`。认证成功后主动发送的 `ACCEPT` 使用相同信封，`reply_to: null`、`payload: []`，不对应任何客户端请求。`PING` 和每个业务事件成功处理后都返回对应的 `<请求 type>.ACK`；校验或处理失败时返回 `error`。`REQUEST_ACTION` 的结果可能稍后返回，也可能因决策失败返回 `error`。客户端应按 `reply_to` 匹配响应。客户端消息 `id` 只用于关联响应，**不是幂等键**；重复发送业务事件可能重复计入牌局。协议没有定义自动重发或去重确认；不要把未收到回复的消息直接当作已经成功处理。
+`id` 为服务端生成的消息 ID；应答消息的 `reply_to` 对应客户端的 `id`。认证成功后主动发送的 `ACCEPT` 使用相同信封，`reply_to: null`，`payload` 含服务端签发的 `client_id`，不对应任何客户端请求。`PING` 和每个业务事件成功处理后都返回对应的 `<请求 type>.ACK`；校验或处理失败时返回 `error`。`REQUEST_ACTION` 的结果可能稍后返回，也可能因决策失败返回 `error`。客户端应按 `reply_to` 匹配响应。客户端消息 `id` 只用于关联响应，**不是幂等键**；重复发送业务事件可能重复计入牌局。协议没有定义自动重发或去重确认；不要把未收到回复的消息直接当作已经成功处理。
 
 | 客户端 `type` | 用途 | 成功处理时的回复 |
 | --- | --- | --- |
@@ -453,7 +455,7 @@ UID 不区分大小写；例如 `Aa1001` 与 `aA1001` 指向同一玩家。新�
 
 `OVER` 中 `returns` 会从玩家及牌局最终投入扣除，`winners` 仍表示实际奖金；向 Proto 提交 `fullGameLog` 时，对每个玩家发送的 `playerWon.amount` 为实际奖金加退回额，只有退回额的玩家也会发送。
 
-`OVER.ACK` 和 `ABORT.ACK` 均返回 `payload: []`；收到回复时，牌局已保存。正常结束的状态为 `OVER`，提前终止的状态为 `ABORT`。
+`OVER.ACK` 和 `ABORT.ACK` 均返回 `payload: []`；收到回复表示结束事件已处理且保存任务已提交，数据库保存由异步队列完成。查询历史牌局时可能需要等待保存完成。正常结束的状态为 `OVER`，提前终止的状态为 `ABORT`。
 
 ### 3.7 WebSocket 错误
 
@@ -475,11 +477,12 @@ UID 不区分大小写；例如 `Aa1001` 与 `aA1001` 指向同一玩家。新�
 
 ```text
 POST /api/auth/login  → 取得 token
-连接 GameServer /?token=<token> → 服务端 ACCEPT（无需等待 PING.ACK）
+首次连接 GameServer /?token=<token> → 服务端 ACCEPT，保存 payload.client_id
 START                → START.ACK，保存 game_uuid
 STAGE(PREFLOP, [])   → STAGE.ACK
 DEALT(两张 Hero 手牌) → DEALT.ACK
 REQUEST_ACTION       → REQUEST_ACTION.ACK，读取建议
+（如发生断线）重连 /?token=<token>&client_id=<保存的标识> → ACCEPT，继续原 game_uuid
 ACTION(Hero 实际行动) → ACTION.ACK
 ACTION(对手行动)      → ACTION.ACK
 STAGE(FLOP, 三张牌)   → STAGE.ACK
@@ -489,4 +492,4 @@ OVER 或 ABORT         → 对应 .ACK
 GET /api/mine/games/detail?game_id=<game_uuid> 查询保存结果
 ```
 
-GameServer 客户端按发生顺序发送**单条** `STAGE`、`DEALT`、`ACTION`、`SHOW` 消息。连接断开后可用有效令牌重新连接并继续引用尚有效的 `game_uuid`；无需单独的会话恢复消息。实时牌局状态在创建及每次事件保存后保留 1 小时；超过该时限未更新时，后续请求可能返回 `game_uuid_not_found`，即使牌局已在 HTTP 历史记录中可见。每条新消息都应使用新的 `id` 和当前 `timestamp`。
+GameServer 客户端按发生顺序发送**单条** `STAGE`、`DEALT`、`ACTION`、`SHOW` 消息。连接断开后，须用同一用户的有效令牌和上次 `ACCEPT` 返回的 `client_id` 重新连接，才能继续引用该客户端尚有效的 `game_uuid`；只带令牌会得到新的客户端标识，不能继续原牌局。令牌更新后，只要仍属于同一用户，也可带回原 `client_id`。即使已收到 `REQUEST_ACTION.ACK`，重连后仍使用同一 `game_uuid` 继续上报；无需单独的会话恢复消息。实时牌局状态在创建及每次事件保存后保留 1 小时；超过该时限未更新时，后续请求可能返回 `game_uuid_not_found`，即使牌局已在 HTTP 历史记录中可见。每条新消息都应使用新的 `id` 和当前 `timestamp`。
