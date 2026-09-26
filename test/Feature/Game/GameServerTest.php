@@ -88,7 +88,7 @@ final class GameServerTest extends DatabaseTestCase
             'game_uuid' => $provider->started->uuid, 'uid' => 'seat3', 'type' => 'BB', 'amount' => 2,
         ], time() * 1000));
         self::assertSame('BB', $provider->posted?->payload['type']);
-        self::assertSame(2, $provider->posted?->game->pot());
+        self::assertSame(2, $provider->posted->game->pot());
     }
 
     public function test_each_websocket_gets_its_own_client_identity_and_reconnect_restores_it(): void
