@@ -18,9 +18,7 @@ return new class extends Migration
             $table->boolean('is_hero')->default(false)->comment('是否本人');
             $table->unsignedBigInteger('stack')->comment('初始总筹码');
             $table->unsignedBigInteger('ante')->default(0)->comment('前注');
-            $table->unsignedBigInteger('blind')->nullable()->comment('盲注：大盲或小盲');
-            $table->unsignedBigInteger('post_blind')->default(0)->comment('盲注：补盲');
-            $table->unsignedBigInteger('straddle_blind')->default(0)->comment('盲注：自愿盲注');
+            $table->unsignedBigInteger('blind')->default(0)->comment('本手实际支付的全部盲注');
             $table->unsignedBigInteger('returned')->default(0)->comment('未跟注下注退回');
             $table->unsignedBigInteger('bet')->default(0)->comment('主动下注金额');
             $table->unsignedBigInteger('total')->default(0)->comment('累计投注：主动下注+前注+盲注-下注退回');
