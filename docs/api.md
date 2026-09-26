@@ -342,7 +342,7 @@ HTTP 的通用错误码包括 `auth_failed`、`auth_required`、`two_factor_requ
 | `ante` | integer | 必填，非负整数 | 每名玩家本手需支付的前注金额 |
 | `big_blind` | integer | 必填，至少 1 | 本手大盲注金额 |
 | `small_blind` | integer | 必填，非负整数 | 本手小盲注金额 |
-| `button_seat_number` | integer | 必填，1–10；必须对应一名玩家的座位 | 庄家按钮所在座位号，用于确定大小盲位置 |
+| `button_seat_number` | integer | 必填，1–10；允许该座位没有参局玩家 | 庄家按钮所在座位号，用于确定大小盲位置 |
 | `players` | array | 必填，至少 2 名玩家，且至少包含一名 Hero | 参与本手牌局的玩家列表 |
 | `players[].seat` | integer | 必填，1–10，牌局内互不相同 | 玩家在牌桌上的座位号 |
 | `players[].uid` | string | 必填，1–16 位英文字母或数字，牌局内按不区分大小写的规则互不相同；须发送 JSON 字符串，不能发送 JSON 数字 | 玩家标识；后续 `ACTION`、`SHOW`、`OVER` 等事件使用此值引用玩家 |
@@ -350,7 +350,7 @@ HTTP 的通用错误码包括 `auth_failed`、`auth_required`、`two_factor_requ
 | `players[].hero` | boolean | 必填；至少一名玩家为 `true`，客户端应只标记一名 | `true` 表示该玩家是当前用户（Hero），`false` 表示其他玩家 |
 | `players[].stack` | integer | 必填，非负整数；不能传字符串或浮点数 | 玩家本手开始时、支付前注、普通盲注、补盲和自愿盲注之前的初始筹码 |
 
-同一用户的同一 `network` 下，`game_key` 必须唯一，且区分大小写。`START` 时若 Redis 中已有正在进行的牌局，或数据库中已有保存的牌局，返回 `game_already_exists`；重复 `START` 不会创建新的 UUID。成功回复 `payload` 为 `{"game_uuid":"12345678-90ab-4cde-8f01-23456789abcd"}`。后续所有牌局消息都携带这个 UUID。两人牌局中按钮位同时是小盲位；多人牌局中按钮后第一个在座玩家是小盲位，再下一个是大盲位。普通大小盲由 `START` 自动计入；额外补盲须通过 `POST_BLIND` 上报，自愿盲注通过 `STRADDLE_BLIND` 上报。
+同一用户的同一 `network` 下，`game_key` 必须唯一，且区分大小写。`START` 时若 Redis 中已有正在进行的牌局，或数据库中已有保存的牌局，返回 `game_already_exists`；重复 `START` 不会创建新的 UUID。成功回复 `payload` 为 `{"game_uuid":"12345678-90ab-4cde-8f01-23456789abcd"}`。后续所有牌局消息都携带这个 UUID。两人牌局中，按钮位有参局玩家时，该玩家同时是小盲位；按钮位空缺时，顺时针下一名参局玩家是小盲位。多人牌局中，按钮后第一名参局玩家是小盲位。所有情况下，小盲位后的下一名参局玩家是大盲位；座位号到末尾后从头继续查找。若客户端附带 `small_blind_seat_number` 或 `big_blind_seat_number`，服务端忽略这两个字段，始终从按钮位推算。普通大小盲由 `START` 自动计入；额外补盲须通过 `POST_BLIND` 上报，自愿盲注通过 `STRADDLE_BLIND` 上报。
 
 UID 不区分大小写；例如 `Aa1001` 与 `aA1001` 指向同一玩家。新建牌局的 UID 统一以小写保存并返回；后续事件使用牌局中保存的 UID 形式记录。
 

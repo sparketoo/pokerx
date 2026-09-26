@@ -67,7 +67,7 @@ class GameVo extends Vo
     ) {
         $seats = array_column($players, 'seat');
         sort($seats, SORT_NUMERIC);
-        if (count($seats) < 2 || ! in_array($buttonSeatNumber, $seats, true)) {
+        if (count($seats) < 2) {
             throw new GameException(__('messages.game.big_blind_not_found'));
         }
         $nextSeat = static function (int $seat) use ($seats): int {
@@ -79,7 +79,9 @@ class GameVo extends Vo
 
             return $seats[0];
         };
-        $this->smallBlindSeatNumber = count($seats) === 2 ? $buttonSeatNumber : $nextSeat($buttonSeatNumber);
+        $this->smallBlindSeatNumber = count($seats) === 2 && in_array($buttonSeatNumber, $seats, true)
+            ? $buttonSeatNumber
+            : $nextSeat($buttonSeatNumber);
         $this->bigBlindSeatNumber = $nextSeat($this->smallBlindSeatNumber);
         $this->events = new Collection;
         $this->players = new Collection([]);

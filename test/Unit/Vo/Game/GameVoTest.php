@@ -73,6 +73,36 @@ final class GameVoTest extends TestCase
         self::assertSame(['villain-1', 'villain-2'], $game->anotherPlayers()->pluck('uid')->all());
     }
 
+    public function test_empty_button_seat_uses_next_players_for_blinds(): void
+    {
+        $game = new GameVo(1, '11111111-1111-4111-8111-000000000018', NetworkEnum::OK, '6507433#18', 6, 3, 6, [
+            ['uid' => 'player1', 'seat' => 1, 'stack' => 100, 'hero' => false],
+            ['uid' => 'player2', 'seat' => 2, 'stack' => 100, 'hero' => false],
+            ['uid' => 'player4', 'seat' => 4, 'stack' => 100, 'hero' => false],
+            ['uid' => 'player5', 'seat' => 5, 'stack' => 100, 'hero' => false],
+            ['uid' => 'player7', 'seat' => 7, 'stack' => 100, 'hero' => false],
+            ['uid' => 'hero', 'seat' => 8, 'stack' => 100, 'hero' => true],
+        ], 3, 'client-a');
+
+        self::assertSame(4, $game->smallBlindSeatNumber());
+        self::assertSame(5, $game->bigBlindSeatNumber());
+        self::assertSame('player5', $game->bigBlindPlayer()->uid);
+        self::assertSame(45, $game->pot());
+    }
+
+    public function test_heads_up_empty_button_seat_assigns_both_blinds_to_players(): void
+    {
+        $game = new GameVo(1, '11111111-1111-4111-8111-000000000019', NetworkEnum::OK, 'room#19', 6, 3, 0, [
+            ['uid' => 'hero', 'seat' => 4, 'stack' => 100, 'hero' => true],
+            ['uid' => 'villain', 'seat' => 8, 'stack' => 100, 'hero' => false],
+        ], 3, 'client-a');
+
+        self::assertSame(4, $game->smallBlindSeatNumber());
+        self::assertSame(8, $game->bigBlindSeatNumber());
+        self::assertSame(3, $game->hero()->blind);
+        self::assertSame(6, $game->bigBlindPlayer()->blind);
+    }
+
     public function test_events_update_stage_cards_bets_and_final_winnings(): void
     {
         $game = GameVoFixture::headsUp();
