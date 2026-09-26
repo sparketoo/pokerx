@@ -21,7 +21,7 @@ use function Hyperf\Translation\__;
 
 final class ProtoWebSocketClient extends WebSocketClient
 {
-    private const int LEASE_TTL = 40;
+    private const int LEASE_TTL = 15;
 
     private const int SESSION_TTL = 120;
 

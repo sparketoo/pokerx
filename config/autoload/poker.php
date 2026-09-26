@@ -21,7 +21,7 @@ return [
         'currency' => env('PROTO_CURRENCY', 'USDT'),
         'connect_timeout' => 5,
         'request_timeout' => 10,
-        'ping_interval' => 20,
+        'ping_interval' => 5,
         'idle_timeout' => 55,
     ],
     'mock' => [
