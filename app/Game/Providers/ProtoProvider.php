@@ -75,7 +75,7 @@ final class ProtoProvider extends BaseProvider
             'structType' => 'getAnswer',
             'gameId' => $game->uuid,
             'potForAlpha' => $game->pot(),
-            'delay' => (int) ($this->options['delay'] ?? 9000),
+            'delay' => (int) ($this->options['delay'] ?? 15000),
         ]);
         $result = $this->actionResult($response, $game->uuid);
 

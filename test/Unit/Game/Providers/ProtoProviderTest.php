@@ -138,7 +138,9 @@ final class ProtoProviderTest extends TestCase
             $replayedEvents = json_decode($reconnected->sent[1]['data'], true, 512, JSON_THROW_ON_ERROR);
             self::assertSame($game->uuid, $replayedEvents['game']['gameId']);
             self::assertContains(['eventType' => 'playerActed', 'name' => 'hero', 'action' => 'call', 'amount' => 50], $replayedEvents['events']);
-            self::assertSame($game->uuid, json_decode($reconnected->sent[2]['data'], true, 512, JSON_THROW_ON_ERROR)['gameId']);
+            $answerRequest = json_decode($reconnected->sent[2]['data'], true, 512, JSON_THROW_ON_ERROR);
+            self::assertSame($game->uuid, $answerRequest['gameId']);
+            self::assertSame(15000, $answerRequest['delay']);
             $provider->disconnect($restoredConnection);
         });
     }

@@ -20,7 +20,7 @@ return [
         'network' => env('PROTO_NETWORK', 'WE'),
         'currency' => env('PROTO_CURRENCY', 'USDT'),
         'connect_timeout' => 5,
-        'request_timeout' => 10,
+        'request_timeout' => 20,
         'ping_interval' => 5,
         'idle_timeout' => 55,
     ],
