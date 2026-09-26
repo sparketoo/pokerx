@@ -69,7 +69,7 @@ final class GamesControllerTest extends DatabaseTestCase
             Db::table('game_players')->insert([
                 'game_id' => $id, 'seat' => $seat, 'uid' => $uid, 'name' => $uid,
                 'is_hero' => $uid === 'hero', 'stack' => 1000, 'ante' => 0,
-                'blind' => 50, 'post_blind' => $uid === 'hero' ? 2 : 0,
+                'blind' => $uid === 'hero' ? 52 : 50,
                 'bet' => 100, 'total' => $uid === 'hero' ? 152 : 150,
             ]);
         }
@@ -80,7 +80,7 @@ final class GamesControllerTest extends DatabaseTestCase
         self::assertSame('11111111111141118111000000000001', $data['game']['game_key']);
         self::assertSame([1, 2], array_column($data['game']['gamePlayers'], 'seat'));
         self::assertSame([true, false], array_column($data['game']['gamePlayers'], 'is_hero'));
-        self::assertSame([2, 0], array_column($data['game']['gamePlayers'], 'post_blind'));
+        self::assertSame([52, 50], array_column($data['game']['gamePlayers'], 'blind'));
         self::assertFalse($data['pending']);
     }
 

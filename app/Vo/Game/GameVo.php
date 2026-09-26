@@ -46,10 +46,6 @@ class GameVo extends Vo
 
     public readonly int $createdAtMs;
 
-    private readonly int $smallBlindSeatNumber;
-
-    private readonly int $bigBlindSeatNumber;
-
     /**
      * @param  list<array{uid:string,name?:string,seat:int,stack:int,hero:bool}>  $players
      */
@@ -65,24 +61,15 @@ class GameVo extends Vo
         public readonly int $buttonSeatNumber,
         public readonly string $clientId,
     ) {
-        $seats = array_column($players, 'seat');
-        sort($seats, SORT_NUMERIC);
-        if (count($seats) < 2) {
-            throw new GameException(__('messages.game.big_blind_not_found'));
-        }
-        $nextSeat = static function (int $seat) use ($seats): int {
-            foreach ($seats as $candidate) {
-                if ($candidate > $seat) {
-                    return $candidate;
-                }
-            }
 
-            return $seats[0];
-        };
-        $this->smallBlindSeatNumber = count($seats) === 2 && in_array($buttonSeatNumber, $seats, true)
-            ? $buttonSeatNumber
-            : $nextSeat($buttonSeatNumber);
-        $this->bigBlindSeatNumber = $nextSeat($this->smallBlindSeatNumber);
+        if (count($players) < 2) {
+            throw new GameException(__('messages.game.players_less_than_two'));
+        }
+
+        if ($this->buttonSeatNumber < 1 || $this->buttonSeatNumber > 10) {
+            throw new GameException(__('messages.game.button_seat_not_found'));
+        }
+
         $this->events = new Collection;
         $this->players = new Collection([]);
         foreach ($players as $player) {
@@ -99,22 +86,10 @@ class GameVo extends Vo
         if ($this->players->isEmpty()) {
             throw new GameException(__('messages.game.players_empty'), ErrorCode::BUSINESS_ERROR);
         }
-        // 校验本人和大盲是否存在
         $this->hero();
-        $this->bigBlindPlayer();
         $this->stage = StageEnum::PREFLOP;
         $this->status = GameStatusEnum::OPEN;
         $this->createdAtMs = (int) (microtime(true) * 1000);
-    }
-
-    public function smallBlindSeatNumber(): int
-    {
-        return $this->smallBlindSeatNumber;
-    }
-
-    public function bigBlindSeatNumber(): int
-    {
-        return $this->bigBlindSeatNumber;
     }
 
     /**
@@ -131,22 +106,6 @@ class GameVo extends Vo
         }
 
         return $hero;
-    }
-
-    /**
-     * 获取大盲玩家
-     *
-     * @throws GameException
-     */
-    public function bigBlindPlayer(): GamePlayerVo
-    {
-        /** @var GamePlayerVo|null $bb */
-        $bb = $this->players->first(fn (GamePlayerVo $playerVo) => $playerVo->isBb());
-        if (empty($bb)) {
-            throw new GameException(__('messages.game.big_blind_not_found'), ErrorCode::BUSINESS_ERROR);
-        }
-
-        return $bb;
     }
 
     /**
@@ -204,25 +163,30 @@ class GameVo extends Vo
             $uid = $player->uid;
             $payload['uid'] = $uid;
         }
-        if ($type->isPostBlind()) {
-            // 补盲必须紧跟 START；重复或迟到事件会使底池与决策服务的事件顺序失真。
-            $amount = $payload['amount'] ?? null;
-            if ($this->events->contains(fn (GameEventVo $event) => ! $event->type->isPostBlind()) || ! is_int($amount) || $amount <= 0) {
-                throw new GameException(__('messages.game.event_invalid'), ErrorCode::EVENT_INVALID);
-            }
-            $player = $this->playerOrFail(is_string($uid) ? $uid : '');
-            if ($player->postBlind > 0 || $amount > $player->stack - $player->ante - $player->blind) {
-                throw new GameException(__('messages.game.event_invalid'), ErrorCode::EVENT_INVALID);
-            }
-        }
-        if ($type->isStraddleBlind()) {
-            // OK 可先广播 PREFLOP 再广播自愿盲注；只要求此时仍在翻牌前。
+        if ($type->isBlindPosted()) {
+            $blindType = $payload['type'] ?? null;
             $amount = $payload['amount'] ?? null;
             $player = $this->playerOrFail(is_string($uid) ? $uid : '');
-            if ($this->stage !== StageEnum::PREFLOP || ! is_int($amount) || $amount <= 0
-                || $amount > $player->stack - $player->total()) {
+            if (! in_array($blindType, ['SB', 'BB', 'POST', 'STRADDLE'], true)
+                || ! is_int($amount) || $amount <= 0 || $amount > $player->stack - $player->total()
+                || $this->stage !== StageEnum::PREFLOP) {
                 throw new GameException(__('messages.game.event_invalid'), ErrorCode::EVENT_INVALID);
             }
+            // 普通盲注和补盲在其他事件前；自愿盲注可在 PREFLOP 后到达。
+            if ($blindType !== 'STRADDLE' && $this->events->contains(fn (GameEventVo $event): bool => ! $event->type->isBlindPosted() || ($event->payload['type'] ?? null) === 'STRADDLE')) {
+                throw new GameException(__('messages.game.event_invalid'), ErrorCode::EVENT_INVALID);
+            }
+            if (($blindType === 'SB' || $blindType === 'BB')
+                && $this->events->contains(fn (GameEventVo $event): bool => $event->type->isBlindPosted()
+                    && (($event->payload['type'] ?? null) === $blindType
+                        || ($event->player === $player && in_array($event->payload['type'] ?? null, ['SB', 'BB'], true))))) {
+                throw new GameException(__('messages.game.event_invalid'), ErrorCode::EVENT_INVALID);
+            }
+            if ($blindType === 'POST' && $this->events->contains(fn (GameEventVo $event): bool => $event->type->isBlindPosted()
+                && ($event->payload['type'] ?? null) === 'POST' && $event->player === $player)) {
+                throw new GameException(__('messages.game.event_invalid'), ErrorCode::EVENT_INVALID);
+            }
+            $player->blind += $amount;
         }
         if ($type->isOver()) {
             $seen = [];
@@ -257,12 +221,7 @@ class GameVo extends Vo
         );
         $this->events->push($event);
 
-        if ($type->isPostBlind()) {
-            // POST 是活盲：计入本轮已投入，后续普通 ACTION 的 amount 不再包含这笔钱。
-            $this->playerOrFail($uid ?? '')->postBlind = $payload['amount'];
-        } elseif ($type->isStraddleBlind()) {
-            $this->playerOrFail($uid ?? '')->straddleBlind += $payload['amount'];
-        } elseif ($type->isAction()) {
+        if ($type->isAction()) {
             // 玩家操作
             $action = ActionEnum::fromNameOrFail($payload['action']);
             $this->playerOrFail($uid ?? '')->action($action, $payload['amount'] ?? null);

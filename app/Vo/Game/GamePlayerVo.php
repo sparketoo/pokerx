@@ -13,24 +13,14 @@ class GamePlayerVo extends Vo
      */
     public readonly int $ante;
 
-    /**
-     * 盲注
-     */
-    public readonly int $blind;
-
-    /**
-     * 本手额外补交的盲注，计入翻牌前已投入。
-     */
-    public int $postBlind = 0;
-
-    /** 自愿盲注，计入翻牌前已投入。 */
-    public int $straddleBlind = 0;
+    /** 本手实际支付的全部盲注。 */
+    public int $blind = 0;
 
     /** 未被跟注而退回的下注，不计入最终底池。 */
     public int $returned = 0;
 
     /**
-     * 主动下注总额（不含前注、大小盲、补盲和自愿盲注）
+     * 主动下注总额（不含前注和盲注）
      */
     public int $bet;
 
@@ -65,14 +55,6 @@ class GamePlayerVo extends Vo
 
         // 前注
         $this->ante = $this->game->ante;
-        // 盲注
-        if ($this->isSb()) {
-            $this->blind = $this->game->smallBlind;
-        } elseif ($this->isBb()) {
-            $this->blind = $this->game->bigBlind;
-        } else {
-            $this->blind = 0;
-        }
         $this->bet = 0;
     }
 
@@ -81,7 +63,7 @@ class GamePlayerVo extends Vo
      */
     public function total(): int
     {
-        return $this->ante + $this->blind + $this->postBlind + $this->straddleBlind + $this->bet - $this->returned;
+        return $this->ante + $this->blind + $this->bet - $this->returned;
     }
 
     /**
@@ -120,16 +102,6 @@ class GamePlayerVo extends Vo
         $this->cards = $cards;
 
         return $this;
-    }
-
-    public function isSb(): bool
-    {
-        return $this->seatNumber === $this->game->smallBlindSeatNumber();
-    }
-
-    public function isBb(): bool
-    {
-        return $this->seatNumber === $this->game->bigBlindSeatNumber();
     }
 
     public function winnings(int $amount): static

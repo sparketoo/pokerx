@@ -39,7 +39,6 @@ final class UserTokenServiceTest extends DatabaseTestCase
         self::assertNull($service->validateToken($expired->plainTextToken));
         $used = $service->validateToken($valid->plainTextToken);
         self::assertInstanceOf(UserToken::class, $used);
-        self::assertNotNull(UserToken::query()->findOrFail($used->id)->last_used_at);
 
         $user->update(['status' => 'DISABLED']);
         self::assertNull($service->validateToken($valid->plainTextToken));

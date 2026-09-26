@@ -12,7 +12,9 @@ use App\Model\User;
 use App\Service\GameService;
 use App\Service\InsuranceService;
 use App\Service\UserTokenService;
+use App\Vo\Game\GameEventVo;
 use App\Vo\Game\GameServerConnectionVo;
+use App\Vo\Game\GameServerMessageVo;
 use App\Vo\Game\GameVo;
 use Closure;
 use Hyperf\AsyncQueue\Driver\DriverFactory;
@@ -34,6 +36,61 @@ use Throwable;
 
 final class GameServerTest extends DatabaseTestCase
 {
+    public function test_ok_start_does_not_infer_blinds_from_empty_button_seat(): void
+    {
+        $provider = new class extends BaseProvider
+        {
+            public ?GameVo $started = null;
+
+            public ?GameEventVo $posted = null;
+
+            public function start(GameVo $game): void
+            {
+                $this->started = $game;
+            }
+
+            public function blindPosted(GameEventVo $event): void
+            {
+                $this->posted = $event;
+            }
+
+            public function requestAction(GameVo $game, Closure $callback): void {}
+        };
+        $sender = new class extends Sender
+        {
+            public function __construct() {}
+
+            /** @param array<int, mixed> $arguments */
+            public function __call(string $name, array $arguments): bool
+            {
+                return true;
+            }
+        };
+        $user = $this->user();
+        $connection = new GameServerConnectionVo(11, $user, 'client-a');
+        $server = $this->gameServerWithConnections($provider, [11 => $connection], $sender);
+        $server->handleStart(new GameServerMessageVo($connection, 'start-45', 'START', [
+            'game_key' => 'empty-sb-'.bin2hex(random_bytes(8)), 'network' => 'OK', 'ante' => 0,
+            'small_blind' => 1, 'big_blind' => 2, 'button_seat_number' => 7,
+            'players' => [
+                ['uid' => 'seat3', 'seat' => 3, 'stack' => 100, 'hero' => false],
+                ['uid' => 'seat5', 'seat' => 5, 'stack' => 100, 'hero' => false],
+                ['uid' => 'hero', 'seat' => 6, 'stack' => 100, 'hero' => true],
+                ['uid' => 'seat8', 'seat' => 8, 'stack' => 100, 'hero' => false],
+            ],
+        ], time() * 1000));
+
+        self::assertNotNull($provider->started);
+        self::assertSame(7, $provider->started->buttonSeatNumber);
+        self::assertSame(0, $provider->started->pot());
+
+        $server->handleBlindPosted(new GameServerMessageVo($connection, 'blind-45', 'BLIND_POSTED', [
+            'game_uuid' => $provider->started->uuid, 'uid' => 'seat3', 'type' => 'BB', 'amount' => 2,
+        ], time() * 1000));
+        self::assertSame('BB', $provider->posted?->payload['type']);
+        self::assertSame(2, $provider->posted?->game->pot());
+    }
+
     public function test_each_websocket_gets_its_own_client_identity_and_reconnect_restores_it(): void
     {
         $provider = new class extends BaseProvider

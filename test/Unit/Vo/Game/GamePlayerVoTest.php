@@ -21,7 +21,7 @@ final class GamePlayerVoTest extends TestCase
         $game->event(GameEventTypeEnum::ACTION, ['uid' => 'villain', 'action' => 'BET', 'amount' => 100], 2);
 
         self::assertSame(50, $hero->bet);
-        self::assertSame(110, $hero->total());
+        self::assertSame(60, $hero->total());
         self::assertSame(['As', 'Kh'], $hero->cards);
         self::assertSame([GameEventTypeEnum::SHOW], $hero->events()->pluck('type')->all());
     }
@@ -36,6 +36,6 @@ final class GamePlayerVoTest extends TestCase
         self::assertTrue($hero->isFold);
         self::assertSame(0, $hero->bet);
         self::assertSame(0, $hero->winnings);
-        self::assertSame(60, $hero->total());
+        self::assertSame(10, $hero->total());
     }
 }

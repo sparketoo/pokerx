@@ -28,7 +28,9 @@ return [
         'action_amount_invalid' => '行动金额无效。',
         'hero_not_found' => '未找到本局 Hero 玩家。',
         'big_blind_not_found' => '未找到大盲位玩家。',
+        'button_seat_not_found' => '未找到庄家座位。',
         'player_not_found' => '未找到指定玩家。',
+        'players_less_than_two' => '玩家数量不能少于 2 人。',
         'players_empty' => '牌局没有玩家。',
     ],
     'provider' => [

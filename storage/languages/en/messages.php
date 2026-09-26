@@ -28,7 +28,9 @@ return [
         'action_amount_invalid' => 'The action amount is invalid.',
         'hero_not_found' => 'The game hero was not found.',
         'big_blind_not_found' => 'The big blind player was not found.',
+        'button_seat_not_found' => 'The button seat was not found.',
         'player_not_found' => 'The player was not found.',
+        'players_less_than_two' => 'The number of players cannot be fewer than 2.',
         'players_empty' => 'The game has no players.',
     ],
     'provider' => [

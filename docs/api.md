@@ -187,7 +187,7 @@ HTTP 的通用错误码包括 `auth_failed`、`auth_required`、`two_factor_requ
       {
         "id":"81","game_id":"42","seat":1,"uid":"aa1001",
         "name":"Hero","is_hero":true,"stack":1000,"ante":0,
-        "blind":50,"post_blind":0,"straddle_blind":0,"bet":100,"returned":0,"total":150,"cards":"As,Kh",
+        "blind":50,"bet":100,"returned":0,"total":150,"cards":"As,Kh",
         "created_at":"2026-09-23T12:01:00+08:00",
         "updated_at":"2026-09-23T12:01:00+08:00"
       }
@@ -198,7 +198,7 @@ HTTP 的通用错误码包括 `auth_failed`、`auth_required`、`two_factor_requ
 }
 ```
 
-这里的 `game` 包含上表全部字段及按 `seat` 升序排列的 `gamePlayers`。每个玩家包含 `id`、`game_id`（字符串），`uid`、`name`、`seat`、`is_hero`、`stack`、`ante`、`blind`、`post_blind`、`straddle_blind`、`bet`、`returned`、`total`、`cards`、`created_at`、`updated_at`；`blind` 仅为普通大小盲，`post_blind` 为额外补交的活盲，`straddle_blind` 为自愿盲注，`returned` 为未被跟注而退回的筹码；`total` 为前注、普通盲注、补盲、自愿盲注和主动下注之和减去退回额；`cards` 为已知手牌的逗号分隔字符串，未知时为 `null`。`live` 目前为 `null`，`pending` 为 `false`。牌局不存在或不属于当前用户时返回 `not_found`。
+这里的 `game` 包含上表全部字段及按 `seat` 升序排列的 `gamePlayers`。每个玩家包含 `id`、`game_id`（字符串），`uid`、`name`、`seat`、`is_hero`、`stack`、`ante`、`blind`、`bet`、`returned`、`total`、`cards`、`created_at`、`updated_at`；`blind` 为实际支付的全部盲注，类别由 `BLIND_POSTED` 事件的 `payload.type` 区分；`returned` 为未被跟注而退回的筹码；`total` 为前注、全部盲注和主动下注之和减去退回额；`cards` 为已知手牌的逗号分隔字符串，未知时为 `null`。`live` 目前为 `null`，`pending` 为 `false`。牌局不存在或不属于当前用户时返回 `not_found`。
 
 ### 2.7 牌局事件与事件搜索
 
@@ -214,7 +214,7 @@ HTTP 的通用错误码包括 `auth_failed`、`auth_required`、`two_factor_requ
 
 `GET /api/mine/events` 跨牌局搜索当前用户的事件。可选 `keyword`（最多 100 字符，搜索事件类型和载荷文本）、`limit`（默认 50，1–100）、`order`（默认 `desc`）、`cursor`（最长 4096 字符）。
 
-两种事件接口均返回 `items`（事件对象数组）和 `next_cursor`（字符串或 `null`）。每个事件对象包含 `id`、`user_id`、`game_id`（字符串），`type`（`POST_BLIND`、`STRADDLE_BLIND`、`STAGE`、`DEALT`、`ACTION`、`SHOW`、`OVER` 或 `ABORT`），`timestamp`（原始 Unix 毫秒时间戳）、`payload`（原始消息载荷对象）、`created_at`、`updated_at`。`/api/mine/events` 中的每项另含 `game` 简要对象：`id`、`uuid`、`game_key`、`network`。`START` 不作为独立事件保存；它建立牌局和玩家记录。
+两种事件接口均返回 `items`（事件对象数组）和 `next_cursor`（字符串或 `null`）。每个事件对象包含 `id`、`user_id`、`game_id`（字符串），`type`（`BLIND_POSTED`、`STAGE`、`DEALT`、`ACTION`、`SHOW`、`OVER` 或 `ABORT`），`timestamp`（原始 Unix 毫秒时间戳）、`payload`（原始消息载荷对象）、`created_at`、`updated_at`。`/api/mine/events` 中的每项另含 `game` 简要对象：`id`、`uuid`、`game_key`、`network`。`START` 不作为独立事件保存；它建立牌局和玩家记录。
 
 ### 2.8 游戏配置
 
@@ -304,8 +304,7 @@ HTTP 的通用错误码包括 `auth_failed`、`auth_required`、`two_factor_requ
 | --- | --- | --- |
 | `PING` | 应用层探活 | `PING.ACK`，`payload: []` |
 | `START` | 创建一手牌局 | `START.ACK`，返回 `game_uuid` |
-| `POST_BLIND` | 上报任意参局玩家补交的活盲 | `POST_BLIND.ACK`，`payload: []` |
-| `STRADDLE_BLIND` | 上报玩家自愿下的活盲 | `STRADDLE_BLIND.ACK`，`payload: []` |
+| `BLIND_POSTED` | 上报玩家实际支付的盲注，`type` 为 `SB`、`BB`、`POST` 或 `STRADDLE` | `BLIND_POSTED.ACK`，`payload: []` |
 | `STAGE` | 报告阶段及本阶段新公共牌 | `STAGE.ACK`，`payload: []` |
 | `DEALT` | 报告 Hero 两张手牌 | `DEALT.ACK`，`payload: []` |
 | `ACTION` | 报告玩家行动 | `ACTION.ACK`，`payload: []` |
@@ -342,7 +341,7 @@ HTTP 的通用错误码包括 `auth_failed`、`auth_required`、`two_factor_requ
 | `ante` | integer | 必填，非负整数 | 每名玩家本手需支付的前注金额 |
 | `big_blind` | integer | 必填，至少 1 | 本手大盲注金额 |
 | `small_blind` | integer | 必填，非负整数 | 本手小盲注金额 |
-| `button_seat_number` | integer | 必填，1–10；允许该座位没有参局玩家 | 庄家按钮所在座位号，用于确定大小盲位置 |
+| `button_seat_number` | integer | 必填，1–10；允许该座位没有参局玩家 | 庄家按钮所在座位号；不会据此推断大小盲 |
 | `players` | array | 必填，至少 2 名玩家，且至少包含一名 Hero | 参与本手牌局的玩家列表 |
 | `players[].seat` | integer | 必填，1–10，牌局内互不相同 | 玩家在牌桌上的座位号 |
 | `players[].uid` | string | 必填，1–16 位英文字母或数字，牌局内按不区分大小写的规则互不相同；须发送 JSON 字符串，不能发送 JSON 数字 | 玩家标识；后续 `ACTION`、`SHOW`、`OVER` 等事件使用此值引用玩家 |
@@ -350,7 +349,9 @@ HTTP 的通用错误码包括 `auth_failed`、`auth_required`、`two_factor_requ
 | `players[].hero` | boolean | 必填；至少一名玩家为 `true`，客户端应只标记一名 | `true` 表示该玩家是当前用户（Hero），`false` 表示其他玩家 |
 | `players[].stack` | integer | 必填，非负整数；不能传字符串或浮点数 | 玩家本手开始时、支付前注、普通盲注、补盲和自愿盲注之前的初始筹码 |
 
-同一用户的同一 `network` 下，`game_key` 必须唯一，且区分大小写。`START` 时若 Redis 中已有正在进行的牌局，或数据库中已有保存的牌局，返回 `game_already_exists`；重复 `START` 不会创建新的 UUID。成功回复 `payload` 为 `{"game_uuid":"12345678-90ab-4cde-8f01-23456789abcd"}`。后续所有牌局消息都携带这个 UUID。两人牌局中，按钮位有参局玩家时，该玩家同时是小盲位；按钮位空缺时，顺时针下一名参局玩家是小盲位。多人牌局中，按钮后第一名参局玩家是小盲位。所有情况下，小盲位后的下一名参局玩家是大盲位；座位号到末尾后从头继续查找。若客户端附带 `small_blind_seat_number` 或 `big_blind_seat_number`，服务端忽略这两个字段，始终从按钮位推算。普通大小盲由 `START` 自动计入；额外补盲须通过 `POST_BLIND` 上报，自愿盲注通过 `STRADDLE_BLIND` 上报。
+同一用户的同一 `network` 下，`game_key` 必须唯一，且区分大小写。`START` 时若 Redis 中已有正在进行的牌局，或数据库中已有保存的牌局，返回 `game_already_exists`；重复 `START` 不会创建新的 UUID。成功回复 `payload` 为 `{"game_uuid":"12345678-90ab-4cde-8f01-23456789abcd"}`。后续所有牌局消息都携带这个 UUID。
+
+`START` 只记录庄家座位、盲注级别、前注和玩家，不推断大小盲座位，也不将盲注计入玩家或底池。客户端须按实际支付分别上报 `BLIND_POSTED`；小盲、大盲、补盲和自愿盲注分别使用 `type: SB`、`BB`、`POST`、`STRADDLE`。座位号不会因空位而变化。
 
 UID 不区分大小写；例如 `Aa1001` 与 `aA1001` 指向同一玩家。新建牌局的 UID 统一以小写保存并返回；后续事件使用牌局中保存的 UID 形式记录。
 
@@ -360,14 +361,13 @@ UID 不区分大小写；例如 `Aa1001` 与 `aA1001` 指向同一玩家。新�
 
 | `type` | `payload` 示例 | 约束及含义 |
 | --- | --- | --- |
-| `POST_BLIND` | `{"game_uuid":"12345678-90ab-4cde-8f01-23456789abcd","uid":"bB1002","amount":100}` | `uid` 可为本手任意参局玩家；`amount` 为实际补交的正 JSON 整数（1–100000000），不得超过该玩家支付前注和普通盲注后的剩余筹码。每名玩家每手最多上报一次，必须在 `START.ACK` 后、任何 `STAGE`、`DEALT`、`ACTION` 等事件之前上报。它是活盲，计入翻牌前已投入和底池，不得再作为 `ACTION` 重复上报 |
-| `STRADDLE_BLIND` | `{"game_uuid":"12345678-90ab-4cde-8f01-23456789abcd","uid":"bB1002","amount":200}` | 玩家自愿下的活盲；`uid` 指向本手玩家，`amount` 为正 JSON 整数（1–100000000），不得超过该玩家当前剩余筹码。允许按平台广播顺序在 `STAGE(PREFLOP)` 之后上报，但必须仍处于翻牌前；可在翻牌前累计上报多笔。计入本轮已投入和底池，不得再以 `ACTION` 重复上报 |
+| `BLIND_POSTED` | `{"game_uuid":"12345678-90ab-4cde-8f01-23456789abcd","uid":"bB1002","type":"BB","amount":100}` | `type` 必填，取 `SB`、`BB`、`POST`、`STRADDLE`；`uid` 指向本手玩家，`amount` 为实际支付的正 JSON 整数（1–100000000），不得超过当前剩余筹码。`SB` 和 `BB` 每手各最多一次，同一玩家不能同时承担这两种盲注；`POST` 每名玩家每手最多一次。这三类须在任何非盲注事件之前上报。`STRADDLE` 可在 `STAGE(PREFLOP)` 后按广播顺序多次上报，但必须仍处于翻牌前。每笔均计入本轮投入和底池，不得作为 `ACTION` 重复上报 |
 | `STAGE` | `{"game_uuid":"12345678-90ab-4cde-8f01-23456789abcd","stage":"PREFLOP","cards":[]}` | `stage` 为 `PREFLOP`、`FLOP`、`TURN`、`RIVER`；`cards` 必填且为数组，分别要求 0、3、1、1 张**本阶段新公共牌** |
 | `DEALT` | `{"game_uuid":"12345678-90ab-4cde-8f01-23456789abcd","cards":["As","Kh"]}` | Hero 的两张手牌；`cards` 为恰好 2 项的数组 |
 | `ACTION` | `{"game_uuid":"12345678-90ab-4cde-8f01-23456789abcd","uid":"bB1002","action":"CALL","amount":50}` | `uid` 为牌局中玩家的 1–16 位字母或数字字符串；`action` 为 `FOLD`、`CHECK`、`CALL`、`BET`、`RAISE`、`ALL_IN`；`amount` 为非负 JSON 整数，表示**本次新增投入** |
 | `SHOW` | `{"game_uuid":"12345678-90ab-4cde-8f01-23456789abcd","uid":"bB1002","cards":["Qs","Qh"]}` | 报告已知玩家的两张手牌；`uid` 为牌局中玩家的 1–16 位字母或数字字符串 |
 
-上述 `game_uuid` 均必填，必须是有效的 UUID（36 字符，含连字符）。`cards` 中单张牌为字符串，长度最多 3 字符；常规扑克牌记法为点数 `2`–`9`、`T`、`J`、`Q`、`K`、`A` 加花色 `c`、`d`、`h`、`s`，例如 `As`、`Th`。服务端当前只校验卡牌数组项的长度和类型，客户端仍应发送有效牌码。`FOLD`、`CHECK` 发送 `amount: 0`。`POST_BLIND` 上报重复、迟到或超过剩余筹码时返回 `event_invalid`；`STRADDLE_BLIND` 在翻牌后或超过剩余筹码时也返回 `event_invalid`，未知玩家返回 `player_not_found`。`ACTION` 事件记录的是客户端实际观察到的行动；收到行动建议后，客户端还需另发 `ACTION` 上报实际行动。
+上述 `game_uuid` 均必填，必须是有效的 UUID（36 字符，含连字符）。`cards` 中单张牌为字符串，长度最多 3 字符；常规扑克牌记法为点数 `2`–`9`、`T`、`J`、`Q`、`K`、`A` 加花色 `c`、`d`、`h`、`s`，例如 `As`、`Th`。服务端当前只校验卡牌数组项的长度和类型，客户端仍应发送有效牌码。`FOLD`、`CHECK` 发送 `amount: 0`。`BLIND_POSTED` 上报重复、迟到或超过剩余筹码时返回 `event_invalid`，未知玩家返回 `player_not_found`。`ACTION` 事件记录的是客户端实际观察到的行动；收到行动建议后，客户端还需另发 `ACTION` 上报实际行动。
 
 ### 3.4 `REQUEST_ACTION`：获取行动建议
 

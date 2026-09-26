@@ -16,6 +16,41 @@ use Tests\TestCase;
 
 final class GameVoTest extends TestCase
 {
+    public function test_blinds_are_recorded_only_when_posted(): void
+    {
+        $game = GameVoFixture::headsUp();
+
+        self::assertSame(0, $game->pot() - $game->ante * 2);
+        $game->event(GameEventTypeEnum::BLIND_POSTED, ['uid' => 'hero', 'type' => 'SB', 'amount' => 50], 1);
+        $game->event(GameEventTypeEnum::BLIND_POSTED, ['uid' => 'villain', 'type' => 'BB', 'amount' => 100], 2);
+
+        self::assertSame(50, $game->hero()->blind);
+        self::assertSame(100, $game->playerOrFail('villain')->blind);
+        $game->event(GameEventTypeEnum::BLIND_POSTED, ['uid' => 'hero', 'type' => 'POST', 'amount' => 25], 3);
+        self::assertSame(75, $game->hero()->blind);
+    }
+
+    public function test_fewer_than_two_players_reports_player_count(): void
+    {
+        $this->expectException(GameException::class);
+        $this->expectExceptionMessage('玩家数量不能少于 2 人。');
+
+        new GameVo(1, '11111111-1111-4111-8111-000000000047', NetworkEnum::WE, 'room#47', 2, 1, 0, [
+            ['uid' => 'hero', 'seat' => 1, 'stack' => 100, 'hero' => true],
+        ], 1, 'client-a');
+    }
+
+    public function test_invalid_button_seat_reports_button_error(): void
+    {
+        $this->expectException(GameException::class);
+        $this->expectExceptionMessage('未找到庄家座位。');
+
+        new GameVo(1, '11111111-1111-4111-8111-000000000048', NetworkEnum::WE, 'room#48', 2, 1, 0, [
+            ['uid' => 'hero', 'seat' => 1, 'stack' => 100, 'hero' => true],
+            ['uid' => 'villain', 'seat' => 2, 'stack' => 100, 'hero' => false],
+        ], 0, 'client-a');
+    }
+
     public function test_client_id_survives_game_serialization_for_reconnection(): void
     {
         $game = new GameVo(1, '11111111-1111-4111-8111-000000000099', NetworkEnum::WE, 'room-1#99', 100, 50, 0, [
@@ -49,58 +84,18 @@ final class GameVoTest extends TestCase
         self::assertSame(200, $game->hero()->winnings);
     }
 
-    public function test_heads_up_button_posts_small_blind_and_next_seat_posts_big_blind(): void
+    public function test_start_does_not_infer_blinds_from_button_or_empty_seats(): void
     {
-        $game = GameVoFixture::headsUp();
+        $game = new GameVo(1, '11111111-1111-4111-8111-000000000045', NetworkEnum::OK, '6724521#45', 2, 1, 0, [
+            ['uid' => 'seat3', 'seat' => 3, 'stack' => 100, 'hero' => false],
+            ['uid' => 'hero', 'seat' => 6, 'stack' => 100, 'hero' => true],
+        ], 7, 'client-a');
 
-        self::assertSame(1, $game->smallBlindSeatNumber());
-        self::assertSame(2, $game->bigBlindSeatNumber());
-        self::assertSame(60, $game->hero()->total());
-        self::assertSame(110, $game->bigBlindPlayer()->total());
-        self::assertSame(170, $game->pot());
-    }
-
-    public function test_three_player_blinds_follow_button_with_seat_wraparound(): void
-    {
-        $game = new GameVo(1, '11111111-1111-4111-8111-000000000001', NetworkEnum::WE, 'room-1#1', 100, 50, 0, [
-            ['uid' => 'hero', 'seat' => 2, 'stack' => 1000, 'hero' => true],
-            ['uid' => 'villain-1', 'seat' => 5, 'stack' => 1000, 'hero' => false],
-            ['uid' => 'villain-2', 'seat' => 8, 'stack' => 1000, 'hero' => false],
-        ], 8, 'client-a');
-
-        self::assertSame(2, $game->smallBlindSeatNumber());
-        self::assertSame(5, $game->bigBlindSeatNumber());
-        self::assertSame(['villain-1', 'villain-2'], $game->anotherPlayers()->pluck('uid')->all());
-    }
-
-    public function test_empty_button_seat_uses_next_players_for_blinds(): void
-    {
-        $game = new GameVo(1, '11111111-1111-4111-8111-000000000018', NetworkEnum::OK, '6507433#18', 6, 3, 6, [
-            ['uid' => 'player1', 'seat' => 1, 'stack' => 100, 'hero' => false],
-            ['uid' => 'player2', 'seat' => 2, 'stack' => 100, 'hero' => false],
-            ['uid' => 'player4', 'seat' => 4, 'stack' => 100, 'hero' => false],
-            ['uid' => 'player5', 'seat' => 5, 'stack' => 100, 'hero' => false],
-            ['uid' => 'player7', 'seat' => 7, 'stack' => 100, 'hero' => false],
-            ['uid' => 'hero', 'seat' => 8, 'stack' => 100, 'hero' => true],
-        ], 3, 'client-a');
-
-        self::assertSame(4, $game->smallBlindSeatNumber());
-        self::assertSame(5, $game->bigBlindSeatNumber());
-        self::assertSame('player5', $game->bigBlindPlayer()->uid);
-        self::assertSame(45, $game->pot());
-    }
-
-    public function test_heads_up_empty_button_seat_assigns_both_blinds_to_players(): void
-    {
-        $game = new GameVo(1, '11111111-1111-4111-8111-000000000019', NetworkEnum::OK, 'room#19', 6, 3, 0, [
-            ['uid' => 'hero', 'seat' => 4, 'stack' => 100, 'hero' => true],
-            ['uid' => 'villain', 'seat' => 8, 'stack' => 100, 'hero' => false],
-        ], 3, 'client-a');
-
-        self::assertSame(4, $game->smallBlindSeatNumber());
-        self::assertSame(8, $game->bigBlindSeatNumber());
-        self::assertSame(3, $game->hero()->blind);
-        self::assertSame(6, $game->bigBlindPlayer()->blind);
+        self::assertSame(0, $game->pot());
+        $game->event(GameEventTypeEnum::BLIND_POSTED, ['uid' => 'seat3', 'type' => 'BB', 'amount' => 2], 1);
+        self::assertSame(2, $game->pot());
+        self::assertSame(0, $game->hero()->blind);
+        self::assertSame(2, $game->playerOrFail('seat3')->blind);
     }
 
     public function test_events_update_stage_cards_bets_and_final_winnings(): void
@@ -113,7 +108,7 @@ final class GameVoTest extends TestCase
         $game->event(GameEventTypeEnum::OVER, ['winners' => [['uid' => 'hero', 'amount' => 220]]], 5);
 
         self::assertSame(['As', 'Kh'], $game->hero()->cards);
-        self::assertSame(110, $game->hero()->total());
+        self::assertSame(60, $game->hero()->total());
         self::assertSame(['2s', '3s', '4s', '5s'], $game->cards);
         self::assertSame(StageEnum::TURN, $game->stage);
         self::assertSame(GameStatusEnum::OVER, $game->status);
@@ -132,25 +127,25 @@ final class GameVoTest extends TestCase
         }
         $game = new GameVo(1, '11111111-1111-4111-8111-000000000002', NetworkEnum::OK, 'room-129', 2, 1, 2, $players,
             4, 'client-a');
-        self::assertSame(19, $game->pot());
+        self::assertSame(16, $game->pot());
 
-        $heroPost = $game->event(GameEventTypeEnum::POST_BLIND, ['uid' => 'PLAYER3', 'amount' => 2], 1);
-        self::assertSame(21, $game->pot());
-        $otherPost = $game->event(GameEventTypeEnum::POST_BLIND, ['uid' => 'player8', 'amount' => 2], 2);
+        $heroPost = $game->event(GameEventTypeEnum::BLIND_POSTED, ['uid' => 'PLAYER3', 'type' => 'POST', 'amount' => 2], 1);
+        self::assertSame(18, $game->pot());
+        $otherPost = $game->event(GameEventTypeEnum::BLIND_POSTED, ['uid' => 'player8', 'type' => 'POST', 'amount' => 2], 2);
 
         self::assertSame('player3', $heroPost->payload['uid']);
         self::assertSame('player8', $otherPost->player?->uid);
-        self::assertSame(2, $game->hero()->postBlind);
+        self::assertSame(2, $game->hero()->blind);
         self::assertSame(4, $game->hero()->total());
-        self::assertSame(23, $game->pot());
+        self::assertSame(20, $game->pot());
 
         try {
-            $game->event(GameEventTypeEnum::POST_BLIND, ['uid' => 'player8', 'amount' => 2], 3);
-            self::fail('A duplicate POST_BLIND must not increase the pot');
+            $game->event(GameEventTypeEnum::BLIND_POSTED, ['uid' => 'player8', 'type' => 'POST', 'amount' => 2], 3);
+            self::fail('A duplicate POST blind must not increase the pot');
         } catch (GameException $error) {
             self::assertSame(3002, $error->getCode());
         }
-        self::assertSame(23, $game->pot());
+        self::assertSame(20, $game->pot());
         self::assertCount(2, $game->events);
     }
 
@@ -160,8 +155,8 @@ final class GameVoTest extends TestCase
         $game->event(GameEventTypeEnum::STAGE, ['stage' => 'PREFLOP', 'cards' => []], 1);
 
         try {
-            $game->event(GameEventTypeEnum::POST_BLIND, ['uid' => 'hero', 'amount' => 10], 2);
-            self::fail('Late POST_BLIND must be rejected');
+            $game->event(GameEventTypeEnum::BLIND_POSTED, ['uid' => 'hero', 'type' => 'POST', 'amount' => 10], 2);
+            self::fail('A late POST blind must be rejected');
         } catch (GameException $error) {
             self::assertSame(3002, $error->getCode());
         }
@@ -171,8 +166,8 @@ final class GameVoTest extends TestCase
             ['uid' => 'villain', 'seat' => 2, 'stack' => 100, 'hero' => false],
         ], 1, 'client-a');
         try {
-            $short->event(GameEventTypeEnum::POST_BLIND, ['uid' => 'hero', 'amount' => 1], 1);
-            self::fail('POST_BLIND cannot exceed remaining stack');
+            $short->event(GameEventTypeEnum::BLIND_POSTED, ['uid' => 'hero', 'type' => 'POST', 'amount' => 2], 1);
+            self::fail('A POST blind cannot exceed the remaining stack');
         } catch (GameException $error) {
             self::assertSame(3002, $error->getCode());
         }
@@ -182,12 +177,12 @@ final class GameVoTest extends TestCase
     {
         $game = GameVoFixture::headsUp();
         $game->event(GameEventTypeEnum::STAGE, ['stage' => 'PREFLOP', 'cards' => []], 1);
-        $event = $game->event(GameEventTypeEnum::STRADDLE_BLIND, ['uid' => 'HERO', 'amount' => 200], 2);
+        $event = $game->event(GameEventTypeEnum::BLIND_POSTED, ['uid' => 'HERO', 'type' => 'STRADDLE', 'amount' => 200], 2);
 
         self::assertSame('hero', $event->payload['uid']);
-        self::assertSame(200, $game->hero()->straddleBlind);
-        self::assertSame(260, $game->hero()->total());
-        self::assertSame(370, $game->pot());
+        self::assertSame(200, $game->hero()->blind);
+        self::assertSame(210, $game->hero()->total());
+        self::assertSame(220, $game->pot());
     }
 
     public function test_over_returns_reduce_net_contributions_without_changing_winnings(): void
@@ -200,8 +195,8 @@ final class GameVoTest extends TestCase
         ], 2);
 
         self::assertSame(100, $game->hero()->returned);
-        self::assertSame(160, $game->hero()->total());
-        self::assertSame(270, $game->pot());
+        self::assertSame(110, $game->hero()->total());
+        self::assertSame(120, $game->pot());
         self::assertSame(210, $game->hero()->winnings);
     }
 
@@ -210,7 +205,7 @@ final class GameVoTest extends TestCase
         $game = GameVoFixture::headsUp();
         $game->event(GameEventTypeEnum::STAGE, ['stage' => 'FLOP', 'cards' => ['As', 'Kh', 'Qd']], 1);
         try {
-            $game->event(GameEventTypeEnum::STRADDLE_BLIND, ['uid' => 'hero', 'amount' => 200], 2);
+            $game->event(GameEventTypeEnum::BLIND_POSTED, ['uid' => 'hero', 'type' => 'STRADDLE', 'amount' => 200], 2);
             self::fail('A straddle after the flop must be rejected');
         } catch (GameException $error) {
             self::assertSame(3002, $error->getCode());
@@ -219,7 +214,7 @@ final class GameVoTest extends TestCase
 
         $short = GameVoFixture::headsUp();
         try {
-            $short->event(GameEventTypeEnum::STRADDLE_BLIND, ['uid' => 'hero', 'amount' => 941], 1);
+            $short->event(GameEventTypeEnum::BLIND_POSTED, ['uid' => 'hero', 'type' => 'STRADDLE', 'amount' => 991], 1);
             self::fail('A straddle cannot exceed the remaining stack');
         } catch (GameException $error) {
             self::assertSame(3002, $error->getCode());

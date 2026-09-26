@@ -487,32 +487,12 @@ final class ProtoHttpProvider extends BaseProvider
                 ];
             }
         }
-        foreach ($game->players as $player) {
-            if ($player->blind > 0) {
-                $events[] = [
-                    'eventType' => 'blindPosted',
-                    'name' => $player->uid,
-                    'blindType' => $player->isSb() ? 'SB' : 'BB',
-                    'amount' => $player->blind,
-                ];
-            }
-        }
         foreach ($game->events->sortBy('timestamp') as $event) {
-            if ($event->type->isPostBlind()) {
+            if ($event->type->isBlindPosted()) {
                 $events[] = [
                     'eventType' => 'blindPosted',
                     'name' => $event->payload['uid'],
-                    'blindType' => 'POST',
-                    'amount' => $event->payload['amount'],
-                ];
-
-                continue;
-            }
-            if ($event->type->isStraddleBlind()) {
-                $events[] = [
-                    'eventType' => 'blindPosted',
-                    'name' => $event->payload['uid'],
-                    'blindType' => 'STRADDLE',
+                    'blindType' => $event->payload['type'],
                     'amount' => $event->payload['amount'],
                 ];
 

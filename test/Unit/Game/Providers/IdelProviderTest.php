@@ -95,9 +95,13 @@ final class IdelProviderTest extends TestCase
 
     private function game(int $heroSeat = 1, int $heroStack = 1000): GameVo
     {
-        return new GameVo(1, '33333333-3333-4333-8333-333333333333', NetworkEnum::WE, 'room#1', 100, 50, 10, [
+        $game = new GameVo(1, '33333333-3333-4333-8333-333333333333', NetworkEnum::WE, 'room#1', 100, 50, 10, [
             ['uid' => 'hero', 'seat' => $heroSeat, 'stack' => $heroStack, 'hero' => true],
             ['uid' => 'villain', 'seat' => $heroSeat === 1 ? 2 : 1, 'stack' => 1000, 'hero' => false],
         ], 1, 'client-a');
+        $game->event(GameEventTypeEnum::BLIND_POSTED, ['uid' => $heroSeat === 1 ? 'hero' : 'villain', 'type' => 'SB', 'amount' => 50], 1);
+        $game->event(GameEventTypeEnum::BLIND_POSTED, ['uid' => $heroSeat === 1 ? 'villain' : 'hero', 'type' => 'BB', 'amount' => 100], 2);
+
+        return $game;
     }
 }

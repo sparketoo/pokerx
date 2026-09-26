@@ -758,22 +758,42 @@ final class ProtoHttpProviderTest extends TestCase
             ['uid' => 'big', 'seat' => 3, 'stack' => 190, 'hero' => false],
             ['uid' => 'other', 'seat' => 4, 'stack' => 190, 'hero' => false],
         ], 1, 'client-a');
-        $game->event(GameEventTypeEnum::POST_BLIND, ['uid' => 'other', 'amount' => 2], 1);
+        $game->event(GameEventTypeEnum::BLIND_POSTED, ['uid' => 'other', 'type' => 'POST', 'amount' => 2], 1);
         $game->event(GameEventTypeEnum::STAGE, ['stage' => 'PREFLOP', 'cards' => []], 2);
         $provider = new ProtoHttpProvider(['url' => 'https://proto.example']);
 
         $events = $provider->gameEvents($game)['events'];
         self::assertSame([
             'eventType' => 'blindPosted', 'name' => 'other', 'blindType' => 'POST', 'amount' => 2,
-        ], $events[10]);
-        self::assertSame('stageStarted', $events[11]['eventType']);
+        ], $events[8]);
+        self::assertSame('stageStarted', $events[9]['eventType']);
+    }
+
+    public function test_ok_heads_up_posts_both_calculated_blinds(): void
+    {
+        $game = new GameVo(1, '12345678-90ab-4cde-8f01-23456789abcf', NetworkEnum::OK, '6724521#45', 2, 1, 0, [
+            ['uid' => 'hero', 'seat' => 6, 'stack' => 100, 'hero' => true],
+            ['uid' => 'big', 'seat' => 8, 'stack' => 100, 'hero' => false],
+        ], 6, 'client-a');
+        $game->event(GameEventTypeEnum::BLIND_POSTED, ['uid' => 'hero', 'type' => 'SB', 'amount' => 1], 1);
+        $game->event(GameEventTypeEnum::BLIND_POSTED, ['uid' => 'big', 'type' => 'BB', 'amount' => 2], 2);
+        $provider = new ProtoHttpProvider(['url' => 'https://proto.example']);
+
+        $posted = array_values(array_filter($provider->gameEvents($game)['events'],
+            static fn (array $event): bool => $event['eventType'] === 'blindPosted'));
+        self::assertSame([
+            ['eventType' => 'blindPosted', 'name' => 'hero', 'blindType' => 'SB', 'amount' => 1],
+            ['eventType' => 'blindPosted', 'name' => 'big', 'blindType' => 'BB', 'amount' => 2],
+        ], $posted);
     }
 
     public function test_straddle_keeps_broadcast_order_and_returns_are_included_in_full_game_log_wins(): void
     {
         $game = $this->game();
+        $game->event(GameEventTypeEnum::BLIND_POSTED, ['uid' => 'hero-1', 'type' => 'SB', 'amount' => 50], 0);
+        $game->event(GameEventTypeEnum::BLIND_POSTED, ['uid' => 'villain-1', 'type' => 'BB', 'amount' => 100], 0);
         $game->event(GameEventTypeEnum::STAGE, ['stage' => 'PREFLOP', 'cards' => []], 1);
-        $game->event(GameEventTypeEnum::STRADDLE_BLIND, ['uid' => 'hero-1', 'amount' => 200], 2);
+        $game->event(GameEventTypeEnum::BLIND_POSTED, ['uid' => 'hero-1', 'type' => 'STRADDLE', 'amount' => 200], 2);
         $game->event(GameEventTypeEnum::OVER, [
             'winners' => [['uid' => 'hero-1', 'amount' => 300]],
             'returns' => [['uid' => 'hero-1', 'amount' => 25], ['uid' => 'villain-1', 'amount' => 7]],

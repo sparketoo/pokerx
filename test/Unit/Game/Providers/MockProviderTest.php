@@ -61,7 +61,7 @@ final class MockProviderTest extends TestCase
             ['uid' => 'small', 'seat' => 2, 'stack' => 100, 'hero' => false],
             ['uid' => 'big', 'seat' => 3, 'stack' => 100, 'hero' => false],
         ], 1, 'client-a');
-        $game->event(GameEventTypeEnum::POST_BLIND, ['uid' => 'hero', 'amount' => 2], 1);
+        $game->event(GameEventTypeEnum::BLIND_POSTED, ['uid' => 'hero', 'type' => 'POST', 'amount' => 2], 1);
 
         $result = $this->request(new MockProvider(1), $game);
 
@@ -73,7 +73,7 @@ final class MockProviderTest extends TestCase
     {
         $game = $this->game();
         $game->event(GameEventTypeEnum::STAGE, ['stage' => 'PREFLOP', 'cards' => []], 1);
-        $game->event(GameEventTypeEnum::STRADDLE_BLIND, ['uid' => 'hero', 'amount' => 100], 2);
+        $game->event(GameEventTypeEnum::BLIND_POSTED, ['uid' => 'hero', 'type' => 'STRADDLE', 'amount' => 100], 2);
 
         $result = $this->request(new MockProvider(1), $game);
 
@@ -116,9 +116,13 @@ final class MockProviderTest extends TestCase
 
     private function game(int $heroStack = 1000, string $uuid = '22222222-2222-4222-8222-222222222222'): GameVo
     {
-        return new GameVo(1, $uuid, NetworkEnum::WE, 'room#1', 100, 50, 10, [
+        $game = new GameVo(1, $uuid, NetworkEnum::WE, 'room#1', 100, 50, 10, [
             ['uid' => 'hero', 'seat' => 1, 'stack' => $heroStack, 'hero' => true],
             ['uid' => 'villain', 'seat' => 2, 'stack' => 1000, 'hero' => false],
         ], 1, 'client-a');
+        $game->event(GameEventTypeEnum::BLIND_POSTED, ['uid' => 'hero', 'type' => 'SB', 'amount' => 50], 1);
+        $game->event(GameEventTypeEnum::BLIND_POSTED, ['uid' => 'villain', 'type' => 'BB', 'amount' => 100], 2);
+
+        return $game;
     }
 }

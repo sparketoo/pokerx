@@ -302,50 +302,28 @@ final class GameServer implements OnCloseInterface, OnMessageInterface, OnOpenIn
     }
 
     /**
-     * 上报任意参局玩家在开局时补交的活盲。
+     * 上报玩家实际支付的盲注。
      */
-    public function handlePostBlind(GameServerMessageVo $message): void
+    public function handleBlindPosted(GameServerMessageVo $message): void
     {
         $payload = $this->validatorFactory->make($message->payload, [
             'game_uuid' => ['required', 'uuid'],
             'uid' => ['required', 'string', 'regex:/\A[A-Za-z0-9]{1,16}\z/'],
+            'type' => ['required', 'string', 'in:SB,BB,POST,STRADDLE'],
             'amount' => ['required', 'integer:strict', 'min:1', 'max:100000000'],
         ])->validate();
 
         $payload['uid'] = strtolower($payload['uid']);
         $event = $this->gameService->event(
             $payload['game_uuid'],
-            GameEventTypeEnum::POST_BLIND,
+            GameEventTypeEnum::BLIND_POSTED,
             $payload,
             $message->timestamp,
             $message->connection->user->id,
             $message->connection->clientId,
         );
 
-        $this->provider()->postBlind($event);
-        $this->ack($message->connection, $message->type, $message->id);
-    }
-
-    /** 上报翻牌前玩家自愿下的活盲。 */
-    public function handleStraddleBlind(GameServerMessageVo $message): void
-    {
-        $payload = $this->validatorFactory->make($message->payload, [
-            'game_uuid' => ['required', 'uuid'],
-            'amount' => ['required', 'integer:strict', 'min:1', 'max:100000000'],
-            'uid' => ['required', 'string', 'regex:/\A[A-Za-z0-9]{1,16}\z/'],
-        ])->validate();
-
-        $payload['uid'] = strtolower($payload['uid']);
-        $event = $this->gameService->event(
-            $payload['game_uuid'],
-            GameEventTypeEnum::STRADDLE_BLIND,
-            $payload,
-            $message->timestamp,
-            $message->connection->user->id,
-            $message->connection->clientId,
-        );
-
-        $this->provider()->straddleBlind($event);
+        $this->provider()->blindPosted($event);
         $this->ack($message->connection, $message->type, $message->id);
     }
 
