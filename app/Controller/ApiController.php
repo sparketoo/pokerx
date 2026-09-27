@@ -18,6 +18,7 @@ use Hyperf\HttpServer\Request;
 use Psr\Http\Message\ResponseInterface as JsonResponse;
 use UnitEnum;
 
+use function App\Support\appTimezone;
 use function App\Support\di;
 use function Hyperf\Translation\__;
 
@@ -72,7 +73,9 @@ abstract class ApiController extends AbstractController
             $v = $v->all();
         }
         if ($v instanceof DateTimeInterface) {
-            return $v->format(DATE_ATOM);
+            return \DateTimeImmutable::createFromInterface($v)
+                ->setTimezone(new \DateTimeZone(appTimezone()))
+                ->format(DATE_ATOM);
         }
         if (is_array($v)) {
             foreach ($v as $k => $val) {

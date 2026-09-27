@@ -25,6 +25,7 @@ use Hyperf\Stringable\Str;
 use Psr\Log\LoggerInterface;
 use Throwable;
 
+use function App\Support\appTimezone;
 use function Hyperf\Translation\__;
 
 final class GameService
@@ -185,7 +186,7 @@ final class GameService
                 'profit' => $hero->winnings - $hero->total(),
             ]);
             if (! $record->exists) {
-                $record->created_at = Carbon::createFromTimestampMs($game->createdAtMs);
+                $record->created_at = Carbon::createFromTimestampMs($game->createdAtMs, appTimezone());
             }
             $record->saveOrFail();
 
@@ -246,7 +247,7 @@ final class GameService
                 'type' => $event->type->name,
                 'timestamp' => $event->timestamp,
                 'payload' => $event->payload,
-                'created_at' => Carbon::createFromTimestampMs($event->timestamp, 'UTC'),
+                'created_at' => Carbon::createFromTimestampMs($event->timestamp, appTimezone()),
                 'updated_at' => $now,
             ]);
             $rows[] = $row->getAttributes();

@@ -51,19 +51,19 @@ class StatsController extends ApiController
      */
     private function statistics(int $userId, array $filters, bool $includeTrend): array
     {
-        $today = Date::now('Asia/Shanghai')->toDateString();
+        $today = Date::now()->toDateString();
         $start = (string) ($filters['start'] ?? $today);
         $end = (string) ($filters['end'] ?? $today);
-        $startDate = Date::parse($start, 'Asia/Shanghai');
-        $endDate = Date::parse($end, 'Asia/Shanghai');
+        $startDate = Date::parse($start);
+        $endDate = Date::parse($end);
         if ($startDate->diffInDays($endDate) > 3660 || $startDate > $endDate) {
             throw new GameException(__('messages.game.event_invalid'), ErrorCode::EVENT_INVALID);
         }
 
         $games = Game::query()->where('user_id', $userId);
         $rangeGames = (clone $games)
-            ->where('created_at', '>=', $startDate->utc())
-            ->where('created_at', '<', $endDate->addDay()->utc());
+            ->where('created_at', '>=', $startDate)
+            ->where('created_at', '<', $endDate->addDay());
 
         $lifetime = $this->totals($games);
         $range = $this->totals(clone $rangeGames);
@@ -114,13 +114,12 @@ class StatsController extends ApiController
         $cumulative = 0;
         $buckets = [];
         foreach ($games->orderBy('created_at')->orderBy('id')->cursor() as $game) {
-            $createdAt = Date::parse((string) $game->getRawOriginal('created_at'), 'UTC')
-                ->timezone('Asia/Shanghai');
+            $createdAt = Date::parse((string) $game->getRawOriginal('created_at'));
             $profit = $game->profit;
             if ($days === 1) {
                 $cumulative += $profit;
                 $trend[] = [
-                    'label' => $createdAt->format('Y-m-d H:i'),
+                    'label' => $createdAt->toIso8601String(),
                     'profit' => $profit,
                     'cumulative_profit' => $cumulative,
                 ];

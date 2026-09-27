@@ -10,9 +10,9 @@ FROM hyperf/hyperf:8.4-alpine-v3.22-swoole
 LABEL org.opencontainers.image.title="PokerX Hyperf" \
       org.opencontainers.image.description="PokerX HTTP and WebSocket backend"
 
-ARG TIMEZONE=Asia/Shanghai
+ARG APP_TIMESTAMP
 
-ENV TIMEZONE=${TIMEZONE} \
+ENV TIMEZONE=${APP_TIMESTAMP} \
     APP_ENV=prod \
     SCAN_CACHEABLE=true \
     COMPOSER_ALLOW_SUPERUSER=1
@@ -21,6 +21,7 @@ WORKDIR /opt/www
 
 # The official Hyperf image already includes Swoole, Redis and pdo_mysql.
 RUN set -eux; \
+    test -n "${TIMEZONE}"; \
     apk add --no-cache tzdata; \
     ln -snf "/usr/share/zoneinfo/${TIMEZONE}" /etc/localtime; \
     echo "${TIMEZONE}" > /etc/timezone; \

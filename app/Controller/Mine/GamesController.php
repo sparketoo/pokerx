@@ -26,10 +26,10 @@ class GamesController extends ApiController
         $user = $this->user($r)->id;
         $q = Game::query()->where('user_id', $user);
         if (isset($f['start'])) {
-            $q->where('created_at', '>=', Date::parse($f['start'], 'Asia/Shanghai')->utc());
+            $q->where('created_at', '>=', Date::parse($f['start']));
         }
         if (isset($f['end'])) {
-            $q->where('created_at', '<', Date::parse($f['end'], 'Asia/Shanghai')->addDay()->utc());
+            $q->where('created_at', '<', Date::parse($f['end'])->addDay());
         }
 
         if (($f['result'] ?? 'all') === 'win') {
@@ -71,10 +71,10 @@ class GamesController extends ApiController
         $f = $r->filters();
         $q = GameEvent::query()->where('user_id', $user);
         if (isset($f['start'])) {
-            $q->where('created_at', '>=', Date::parse($f['start'], 'Asia/Shanghai')->utc());
+            $q->where('created_at', '>=', Date::parse($f['start']));
         }
         if (isset($f['end'])) {
-            $q->where('created_at', '<', Date::parse($f['end'], 'Asia/Shanghai')->addDay()->utc());
+            $q->where('created_at', '<', Date::parse($f['end'])->addDay());
         }
 
         $q->where('game_id', $g->id);

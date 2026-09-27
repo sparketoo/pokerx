@@ -5,11 +5,14 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        APP_TIMESTAMP: ${APP_TIMESTAMP}
     image: pokerx:v1.0.5
     restart: unless-stopped
     environment:
       APP_NAME: ${APP_NAME:-PokerX}
       APP_ENV: ${APP_ENV:-dev}
+      APP_TIMESTAMP: ${APP_TIMESTAMP}
       APP_KEY: ${APP_KEY:-base64:4RXwsfBQ2jOlWtobzSStUS1pLQ1b0C51IQHG/rCcRXc=}
       SCAN_CACHEABLE: ${SCAN_CACHEABLE:-false}
       LOG_OUTPUT: ${LOG_OUTPUT:-php://stdout}
@@ -60,6 +63,7 @@ services:
     image: mysql:8.4
     restart: unless-stopped
     environment:
+      TZ: ${APP_TIMESTAMP}
       MYSQL_DATABASE: ${MYSQL_DATABASE:-pokerx}
       MYSQL_USER: ${MYSQL_USER:-pokerx}
       MYSQL_PASSWORD: ${MYSQL_PASSWORD:-pokerx}

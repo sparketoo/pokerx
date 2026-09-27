@@ -9,6 +9,7 @@
     <env name="DB_DATABASE" value="pokerx_hyperf_test" force="true"/>
     <env name="REDIS_PREFIX" value="pokerx_hyperf_test:" force="true"/>
     <env name="APP_ENV" value="testing" force="true"/>
+    <env name="APP_TIMESTAMP" value="Asia/Shanghai" force="true"/>
   </php>
   <source>
     <include>

@@ -16,11 +16,11 @@ final class StatsControllerTest extends DatabaseTestCase
         $user = $this->user();
         $other = $this->user('other@example.test');
         $this->signIn($user);
-        $this->game($user, '11111111-1111-4111-8111-000000000001', 'CLOSED', 200, 100, '2026-09-22 15:59:59');
-        $this->game($user, '11111111-1111-4111-8111-000000000002', 'OPEN', 50, 0, '2026-09-22 16:00:00');
-        $this->game($user, '11111111-1111-4111-8111-000000000003', 'OVER', 750, 1000, '2026-09-23 04:00:00');
-        $this->game($user, '11111111-1111-4111-8111-000000000004', 'ABORT', 350, 0, '2026-09-23 15:59:59');
-        $this->game($other, '11111111-1111-4111-8111-000000000005', 'OVER', 1, 9999, '2026-09-23 04:00:00');
+        $this->game($user, '11111111-1111-4111-8111-000000000001', 'CLOSED', 200, 100, '2026-09-22 23:59:59');
+        $this->game($user, '11111111-1111-4111-8111-000000000002', 'OPEN', 50, 0, '2026-09-23 00:00:00');
+        $this->game($user, '11111111-1111-4111-8111-000000000003', 'OVER', 750, 1000, '2026-09-23 12:00:00');
+        $this->game($user, '11111111-1111-4111-8111-000000000004', 'ABORT', 350, 0, '2026-09-23 23:59:59');
+        $this->game($other, '11111111-1111-4111-8111-000000000005', 'OVER', 1, 9999, '2026-09-23 12:00:00');
 
         $data = $this->call(new StatsController, 'summary', SummaryRequest::class, [
             'start' => '2026-09-23', 'end' => '2026-09-23',
@@ -33,24 +33,25 @@ final class StatsControllerTest extends DatabaseTestCase
             'hands' => 3, 'wins' => 1, 'total' => 1150, 'profit' => -150, 'win_rate' => 1 / 3,
         ], $data['range']);
         self::assertArrayHasKey('as_of', $data);
+        self::assertStringEndsWith('+08:00', $data['as_of']);
     }
 
     public function test_trend_uses_game_creation_order_and_integer_profit(): void
     {
         $user = $this->user();
         $this->signIn($user);
-        $this->game($user, '11111111-1111-4111-8111-000000000001', 'OVER', 750, 1000, '2026-09-22 16:30:00');
-        $this->game($user, '11111111-1111-4111-8111-000000000002', 'ABORT', 350, 0, '2026-09-23 04:00:00');
-        $this->game($user, '11111111-1111-4111-8111-000000000003', 'OPEN', 100, 100, '2026-09-23 04:30:00');
+        $this->game($user, '11111111-1111-4111-8111-000000000001', 'OVER', 750, 1000, '2026-09-23 00:30:00');
+        $this->game($user, '11111111-1111-4111-8111-000000000002', 'ABORT', 350, 0, '2026-09-23 12:00:00');
+        $this->game($user, '11111111-1111-4111-8111-000000000003', 'OPEN', 100, 100, '2026-09-23 12:30:00');
 
         $data = $this->call(new StatsController, 'trend', TrendRequest::class, [
             'start' => '2026-09-23', 'end' => '2026-09-23',
         ]);
 
         self::assertSame([
-            ['label' => '2026-09-23 00:30', 'profit' => 250, 'cumulative_profit' => 250],
-            ['label' => '2026-09-23 12:00', 'profit' => -350, 'cumulative_profit' => -100],
-            ['label' => '2026-09-23 12:30', 'profit' => 0, 'cumulative_profit' => -100],
+            ['label' => '2026-09-23T00:30:00+08:00', 'profit' => 250, 'cumulative_profit' => 250],
+            ['label' => '2026-09-23T12:00:00+08:00', 'profit' => -350, 'cumulative_profit' => -100],
+            ['label' => '2026-09-23T12:30:00+08:00', 'profit' => 0, 'cumulative_profit' => -100],
         ], $data['items']);
     }
 }

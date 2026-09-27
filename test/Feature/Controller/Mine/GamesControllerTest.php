@@ -20,10 +20,10 @@ final class GamesControllerTest extends DatabaseTestCase
         $user = $this->user();
         $other = $this->user('other@example.test');
         $this->signIn($user);
-        $this->game($user, '11111111-1111-4111-8111-000000000001', 'OVER', 100, 200, '2026-09-22 16:00:00');
-        $this->game($user, '11111111-1111-4111-8111-000000000002', 'ABORT', 150, 0, '2026-09-23 02:00:00');
-        $this->game($user, '11111111-1111-4111-8111-000000000003', 'OPEN', 50, 50, '2026-09-23 16:00:00');
-        $this->game($other, '11111111-1111-4111-8111-000000000004', 'OVER', 1, 999, '2026-09-23 02:00:00');
+        $this->game($user, '11111111-1111-4111-8111-000000000001', 'OVER', 100, 200, '2026-09-23 00:00:00');
+        $this->game($user, '11111111-1111-4111-8111-000000000002', 'ABORT', 150, 0, '2026-09-23 10:00:00');
+        $this->game($user, '11111111-1111-4111-8111-000000000003', 'OPEN', 50, 50, '2026-09-24 00:00:00');
+        $this->game($other, '11111111-1111-4111-8111-000000000004', 'OVER', 1, 999, '2026-09-23 10:00:00');
 
         $win = $this->call(new GamesController, 'index', IndexRequest::class, [
             'start' => '2026-09-23', 'end' => '2026-09-23', 'result' => 'win',
@@ -36,6 +36,7 @@ final class GamesControllerTest extends DatabaseTestCase
         self::assertArrayNotHasKey('hand_number', $win['items'][0]);
         self::assertSame(100, $win['items'][0]['total']);
         self::assertSame(100, $win['items'][0]['profit']);
+        self::assertSame('2026-09-23T00:00:00+08:00', $win['items'][0]['created_at']);
         self::assertArrayNotHasKey('invested', $win['items'][0]);
 
         $loss = $this->call(new GamesController, 'index', IndexRequest::class, ['result' => 'loss']);

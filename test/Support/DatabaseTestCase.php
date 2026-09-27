@@ -21,6 +21,8 @@ use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
 use Tests\TestCase;
 
+use function App\Support\appTimezoneOffset;
+
 abstract class DatabaseTestCase extends TestCase
 {
     private ?ServerRequestInterface $previousRequest;
@@ -40,7 +42,7 @@ abstract class DatabaseTestCase extends TestCase
         $this->previousResponse = ResponseContext::getOrNull();
         $this->previousUser = Context::get(User::class);
 
-        Db::statement("SET time_zone = '+00:00'");
+        Db::statement("SET time_zone = '".appTimezoneOffset()."'");
         Db::statement("CREATE TEMPORARY TABLE users (
             id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
             account VARCHAR(64) NOT NULL UNIQUE,

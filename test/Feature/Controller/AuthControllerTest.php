@@ -40,6 +40,11 @@ final class AuthControllerTest extends DatabaseTestCase
         self::assertSame(hash('sha256', $secret), $stored);
         self::assertNotSame($secret, $stored);
         self::assertArrayHasKey('expires_at', $data);
+        self::assertStringEndsWith('+08:00', $data['expires_at']);
+        self::assertSame(
+            (new \DateTimeImmutable($data['expires_at']))->format('Y-m-d H:i:s'),
+            Db::table('user_tokens')->where('id', (int) $id)->value('expires_at'),
+        );
     }
 
     public function test_login_rejects_wrong_password_and_disabled_account_without_creating_tokens(): void

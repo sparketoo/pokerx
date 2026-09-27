@@ -20,7 +20,6 @@ ini_set('display_errors', 'on');
 ini_set('display_startup_errors', 'on');
 
 error_reporting(E_ALL);
-date_default_timezone_set('Asia/Shanghai');
 
 foreach ([
     'APP_ENV' => 'testing',
@@ -40,6 +39,7 @@ require dirname(__DIR__).'/vendor/autoload.php';
 ! defined('SWOOLE_HOOK_FLAGS') && define('SWOOLE_HOOK_FLAGS', DefaultOption::hookFlags());
 
 ClassLoader::init();
+date_default_timezone_set(\App\Support\appTimezone());
 
 $container = require dirname(__DIR__).'/config/container.php';
 
