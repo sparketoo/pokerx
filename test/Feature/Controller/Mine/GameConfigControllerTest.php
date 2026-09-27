@@ -139,6 +139,12 @@ final class GameConfigControllerTest extends TestCase
             ['key' => 'auto_bet_check_fold', 'value' => '0-1'],
             ['key' => 'auto_bet_bet_raise', 'value' => '4-8'],
             ['key' => 'auto_bet_call_all_in', 'value' => '2-3'],
+            ['key' => 'auto_bet_fold', 'value' => '1-2'],
+            ['key' => 'auto_bet_check', 'value' => '2-3'],
+            ['key' => 'auto_bet_call', 'value' => '3-4'],
+            ['key' => 'auto_bet_bet', 'value' => '4-5'],
+            ['key' => 'auto_bet_raise', 'value' => '5-6'],
+            ['key' => 'auto_bet_all_in', 'value' => '6-7'],
             ['key' => 'auto_bet_insurance', 'value' => '6-10'],
         ];
         $saved = $this->call($controller, 'save', SaveRequest::class, [
@@ -146,19 +152,66 @@ final class GameConfigControllerTest extends TestCase
         ], 'POST');
         self::assertSame(0, $saved['code']);
         self::assertSame('ok', $saved['message']);
-        self::assertSame(4, count($saved['data']['items']));
+        self::assertSame(10, count($saved['data']['items']));
 
-        foreach (['8-11', '5-3', '0.5-2'] as $value) {
+        $legacyUpdate = $this->call($controller, 'save', SaveRequest::class, [
+            'network' => 'OK',
+            'items' => [['key' => 'auto_bet_check_fold', 'value' => '7-9']],
+        ], 'POST');
+        $values = array_column($legacyUpdate['data']['items'], 'value', 'key');
+        self::assertSame('7-9', $values['auto_bet_check_fold']);
+        self::assertSame('1-2', $values['auto_bet_fold']);
+        self::assertSame('2-3', $values['auto_bet_check']);
+
+        $read = $this->call($controller, 'index', IndexRequest::class, ['network' => 'OK']);
+        self::assertSame($legacyUpdate['data']['items'], $read['data']['items']);
+
+        foreach ([
+            ['key' => 'auto_bet_insurance', 'value' => '8-11'],
+            ['key' => 'auto_bet_raise', 'value' => '5-3'],
+            ['key' => 'auto_bet_all_in', 'value' => '0.5-2'],
+        ] as $item) {
             try {
                 $this->call($controller, 'save', SaveRequest::class, [
                     'network' => 'OK',
-                    'items' => [['key' => 'auto_bet_insurance', 'value' => $value]],
+                    'items' => [$item],
                 ], 'POST');
                 self::fail('Invalid delay range must be rejected');
             } catch (ValidationException) {
-                self::assertSame(4, UserGameConfig::query()->where('user_id', 1)->where('network', 'OK')->count());
+                self::assertSame(10, UserGameConfig::query()->where('user_id', 1)->where('network', 'OK')->count());
             }
         }
+    }
+
+    public function test_save_accepts_all_legacy_and_individual_settings_in_one_batch(): void
+    {
+        $this->signIn(1);
+        $controller = $this->controller();
+        $autoKeys = [
+            'auto_bet_check_fold',
+            'auto_bet_bet_raise',
+            'auto_bet_call_all_in',
+            'auto_bet_fold',
+            'auto_bet_check',
+            'auto_bet_call',
+            'auto_bet_bet',
+            'auto_bet_raise',
+            'auto_bet_all_in',
+            'auto_bet_insurance',
+        ];
+        $items = array_map(static fn (string $key): array => ['key' => $key, 'value' => '2-3'], $autoKeys);
+        $items[] = ['key' => 'insurance_default', 'value' => InsuranceService::RATIO_MIN];
+        foreach (range(1, 8) as $outs) {
+            $items[] = ['key' => 'insurance_outs_'.$outs, 'value' => InsuranceService::RATIO_MIN];
+        }
+
+        $response = $this->call($controller, 'save', SaveRequest::class, [
+            'network' => 'OK',
+            'items' => $items,
+        ], 'POST');
+
+        self::assertSame(0, $response['code']);
+        self::assertCount(19, $response['data']['items']);
     }
 
     public function test_save_accepts_every_insurance_ratio_constant(): void

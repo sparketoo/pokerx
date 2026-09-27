@@ -218,7 +218,7 @@ HTTP 的通用错误码包括 `auth_failed`、`auth_required`、`two_factor_requ
 
 ### 2.8 游戏配置
 
-两个接口都需要登录令牌，并按当前用户及 `network` 独立保存配置。这里的 HTTP `network` 仅接受大写值 `OK`、`WPK`、`YW`；原有 `WE`、`WPK_CLUB` 配置仍保留在数据库中。
+两个接口都需要登录令牌，并按当前用户及 `network` 独立保存配置。这里的 HTTP `network` 接受大写值 `OK`、`WE`、`WPK`、`YW`；
 
 `GET /api/mine/game_config?network=OK` 返回该网络下的全部配置，按 `key` 升序排列；无配置时 `items` 为空数组。成功响应示例：
 
@@ -240,12 +240,12 @@ HTTP 的通用错误码包括 `auth_failed`、`auth_required`、`two_factor_requ
 
 | 字段 | 约束及含义 |
 | --- | --- |
-| `network` | 必填；`OK`、`WPK` 或 `YW` |
+| `network` | 必填；`OK`、`WE`、`WPK` 或 `YW` |
 | `items` | 必填；1–13 项，不能重复 `key`；只修改提交的配置项 |
-| `items[].key` | `insurance_default`、`insurance_outs_1` 至 `insurance_outs_8`，或 `auto_bet_check_fold`、`auto_bet_bet_raise`、`auto_bet_call_all_in`、`auto_bet_insurance` |
+| `items[].key` | `insurance_default`、`insurance_outs_1` 至 `insurance_outs_8`，或 `auto_bet_fold`、`auto_bet_check`、`auto_bet_call`、`auto_bet_bet`、`auto_bet_raise`、`auto_bet_all_in`、`auto_bet_insurance`；旧的三个分组键仍可读取和保存 |
 | `items[].value` | 保险键接受 `MIN`、`MAX`、`1`、`1/2`、`1/3`、`1/5`、`1/8`；自动下注键接受 0–10 秒的 `min-max` 字符串；`null` 删除对应配置。 |
 
-自动下注延迟的四个配置键分别对应过牌/弃牌、下注/加注、跟注/全押及保险。值为 `min-max` 秒，例如 `0-10`；两端均为 0–10 的整数，且 `min <= max`。未配置时客户端使用 2–5 秒。
+自动执行延迟分别对应弃牌、过牌、跟注、下注、加注、全下和保险，每项可单独设置。值为 `min-max` 秒，例如 `0-10`；两端均为 0–10 的整数，且 `min <= max`。未配置时客户端使用 2–3 秒。读取旧分组配置时，客户端将对应范围分别用于该组内的行动；同一行动的新键优先。
 
 比例档按 `floor(pot × 比例 ÷ odds)` 计算原始投保额，然后限制在服务端报价的 `min` 与 `max` 内；`1` 使用报价中的 `breakeven`，`MAX` 使用 `max`，`MIN` 使用 `min`，即使 `min` 为 0 也返回 0。未设置具体 outs 档位时使用 `insurance_default`；两者都未设置时，若报价有效则使用 `min`。有效报价下返回的每个投保额都不低于 `min`。
 
