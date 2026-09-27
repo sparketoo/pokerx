@@ -13,6 +13,7 @@ enum NetworkEnum
     case OK;
     case WE;
     case WPK;
+    case WPK_CLUB;
     case YW;
 
     public function isOk(): bool
@@ -33,5 +34,10 @@ enum NetworkEnum
     public function isYw(): bool
     {
         return $this->is(self::YW);
+    }
+
+    public function isWpkClub(): bool
+    {
+        return $this->is(self::WPK_CLUB);
     }
 }
