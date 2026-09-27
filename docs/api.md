@@ -241,7 +241,7 @@ HTTP 的通用错误码包括 `auth_failed`、`auth_required`、`two_factor_requ
 | 字段 | 约束及含义 |
 | --- | --- |
 | `network` | 必填；`OK`、`WE`、`WPK` 或 `YW` |
-| `items` | 必填；1–13 项，不能重复 `key`；只修改提交的配置项 |
+| `items` | 必填；1–19 项，不能重复 `key`；只修改提交的配置项 |
 | `items[].key` | `insurance_default`、`insurance_outs_1` 至 `insurance_outs_8`，或 `auto_bet_fold`、`auto_bet_check`、`auto_bet_call`、`auto_bet_bet`、`auto_bet_raise`、`auto_bet_all_in`、`auto_bet_insurance`；旧的三个分组键仍可读取和保存 |
 | `items[].value` | 保险键接受 `MIN`、`MAX`、`1`、`1/2`、`1/3`、`1/5`、`1/8`；自动下注键接受 0–10 秒的 `min-max` 字符串；`null` 删除对应配置。 |
 
