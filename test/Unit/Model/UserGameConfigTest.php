@@ -16,11 +16,11 @@ final class UserGameConfigTest extends TestCase
 
         $config = new UserGameConfig;
         $config->setRawAttributes([
-            'network' => 'WPK_CLUB',
+            'network' => 'WPK',
             'value' => '"0.125"',
         ], true);
 
-        self::assertSame(NetworkEnum::WPK_CLUB, $config->network);
+        self::assertSame(NetworkEnum::WPK, $config->network);
         self::assertSame('0.125', $config->value);
     }
 }

@@ -159,17 +159,17 @@ HTTP 的通用错误码包括 `auth_failed`、`auth_required`、`two_factor_requ
 
 成功 `data` 包含 `items`（已保存的牌局对象数组）、`next_cursor`（字符串或 `null`）、`pending`（固定为空数组）。`items` 中每个牌局对象的字段如下。
 
-| 字段 | 类型 | 含义 |
-| --- | --- | --- |
-| `id`、`user_id` | string | 数据库记录 ID、所属用户 ID |
-| `uuid` | string | 标准 UUID（36 字符，含连字符） |
-| `network` | string | `OK`、`WE`、`WPK`、`WPK_CLUB` |
-| `game_key` | string | 平台牌局标识，最长 32 字符 |
-| `provider`、`players` | string、integer | 决策服务标识、玩家数 |
-| `status` | string | `OPEN`、`OVER`、`ABORT`、`CLOSED` |
-| `big_blind`、`small_blind`、`ante` | integer | 大盲、小盲、前注 |
+| 字段 | 类型 | 含义                                                                              |
+| --- | --- |---------------------------------------------------------------------------------|
+| `id`、`user_id` | string | 数据库记录 ID、所属用户 ID                                                                |
+| `uuid` | string | 标准 UUID（36 字符，含连字符）                                                             |
+| `network` | string | `OK`、`WE`、`WPK`、`YW`                                                            |
+| `game_key` | string | 平台牌局标识，最长 32 字符                                                                 |
+| `provider`、`players` | string、integer | 决策服务标识、玩家数                                                                      |
+| `status` | string | `OPEN`、`OVER`、`ABORT`、`CLOSED`                                                  |
+| `big_blind`、`small_blind`、`ante` | integer | 大盲、小盲、前注                                                                        |
 | `pot`、`total`、`winnings`、`profit` | integer | 最终底池、Hero 净投入、Hero 实际奖金、Hero 净收益；`pot` 和 `total` 已扣除 `returns`，`winnings` 不含退回额 |
-| `created_at`、`updated_at` | ISO 8601 string | 创建及更新时间 |
+| `created_at`、`updated_at` | ISO 8601 string | 创建及更新时间                                                                         |
 
 `GET /api/mine/games/detail?game_id=<uuid>` 的 `game_id` 必须是有效的 UUID。成功 `data` 为：
 
@@ -218,7 +218,7 @@ HTTP 的通用错误码包括 `auth_failed`、`auth_required`、`two_factor_requ
 
 ### 2.8 游戏配置
 
-两个接口都需要登录令牌，并按当前用户及 `network` 独立保存配置。这里的 HTTP `network` 使用大写值 `OK`、`WE`、`WPK`、`WPK_CLUB`。
+两个接口都需要登录令牌，并按当前用户及 `network` 独立保存配置。这里的 HTTP `network` 仅接受大写值 `OK`、`WPK`、`YW`；原有 `WE`、`WPK_CLUB` 配置仍保留在数据库中。
 
 `GET /api/mine/game_config?network=OK` 返回该网络下的全部配置，按 `key` 升序排列；无配置时 `items` 为空数组。成功响应示例：
 
@@ -230,7 +230,7 @@ HTTP 的通用错误码包括 `auth_failed`、`auth_required`、`two_factor_requ
 
 ```json
 {
-  "network": "ok",
+  "network": "OK",
   "items": [
     {"key": "insurance_default", "value": "MAX"},
     {"key": "insurance_outs_2", "value": "1/8"}
@@ -240,7 +240,7 @@ HTTP 的通用错误码包括 `auth_failed`、`auth_required`、`two_factor_requ
 
 | 字段 | 约束及含义 |
 | --- | --- |
-| `network` | 必填；`OK`、`WE`、`WPK` 或 `WPK_CLUB` |
+| `network` | 必填；`OK`、`WPK` 或 `YW` |
 | `items` | 必填；1–13 项，不能重复 `key`；只修改提交的配置项 |
 | `items[].key` | `insurance_default`、`insurance_outs_1` 至 `insurance_outs_8`，或 `auto_bet_check_fold`、`auto_bet_bet_raise`、`auto_bet_call_all_in`、`auto_bet_insurance` |
 | `items[].value` | 保险键接受 `MIN`、`MAX`、`1`、`1/2`、`1/3`、`1/5`、`1/8`；自动下注键接受 0–10 秒的 `min-max` 字符串；`null` 删除对应配置。 |
@@ -337,7 +337,7 @@ HTTP 的通用错误码包括 `auth_failed`、`auth_required`、`two_factor_requ
 | `payload` 字段 | 类型 | 约束 | 含义 |
 | --- | --- | --- | --- |
 | `game_key` | string | 必填，最长 32 字符，首尾不能有空白字符 | 平台牌局标识；支持手数的平台使用 `roomNumber#handNumber`，其他平台使用平台游戏局 ID |
-| `network` | string | 必填：`OK`、`WE`、`WPK`、`WPK_CLUB` | 牌局所属的平台或网络 |
+| `network` | string | 必填：`OK`、`WPK`、`YW` | 牌局所属的平台或网络 |
 | `ante` | integer | 必填，非负整数 | 每名玩家本手需支付的前注金额 |
 | `big_blind` | integer | 必填，至少 1 | 本手大盲注金额 |
 | `small_blind` | integer | 必填，非负整数 | 本手小盲注金额 |

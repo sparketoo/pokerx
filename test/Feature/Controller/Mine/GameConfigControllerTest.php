@@ -80,18 +80,18 @@ final class GameConfigControllerTest extends TestCase
     {
         $controller = $this->controller();
         try {
-            $this->call($controller, 'index', IndexRequest::class, ['network' => 'WPK_CLUB']);
+            $this->call($controller, 'index', IndexRequest::class, ['network' => 'WPK']);
             self::fail('An unauthenticated user must not read game configuration');
         } catch (AuthException $error) {
             self::assertSame(2000, $error->getCode());
         }
 
-        UserGameConfig::query()->create(['user_id' => 1, 'network' => NetworkEnum::WPK_CLUB, 'key' => 'insurance_default', 'value' => InsuranceService::RATIO_8]);
+        UserGameConfig::query()->create(['user_id' => 1, 'network' => NetworkEnum::WPK, 'key' => 'insurance_default', 'value' => InsuranceService::RATIO_8]);
         UserGameConfig::query()->create(['user_id' => 1, 'network' => NetworkEnum::WE, 'key' => 'insurance_default', 'value' => InsuranceService::RATIO_MAX]);
-        UserGameConfig::query()->create(['user_id' => 2, 'network' => NetworkEnum::WPK_CLUB, 'key' => 'insurance_default', 'value' => InsuranceService::RATIO_1]);
+        UserGameConfig::query()->create(['user_id' => 2, 'network' => NetworkEnum::OK, 'key' => 'insurance_default', 'value' => InsuranceService::RATIO_1]);
         $this->signIn(1);
 
-        $response = $this->call($controller, 'index', IndexRequest::class, ['network' => 'WPK_CLUB']);
+        $response = $this->call($controller, 'index', IndexRequest::class, ['network' => 'WPK']);
 
         self::assertSame(['code' => 0, 'message' => 'ok', 'data' => [
             'items' => [['key' => 'insurance_default', 'value' => InsuranceService::RATIO_8]],

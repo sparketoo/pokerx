@@ -69,7 +69,7 @@ abstract class DatabaseTestCase extends TestCase
             id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
             uuid CHAR(36) NOT NULL UNIQUE,
             user_id BIGINT UNSIGNED NOT NULL,
-            network ENUM('OK','WE','WPK','WPK_CLUB') NOT NULL,
+            network ENUM('OK','WE','WPK' ,'YW') NOT NULL,
             game_key VARCHAR(32) COLLATE utf8mb4_bin NOT NULL,
             provider VARCHAR(32) NOT NULL,
             players TINYINT UNSIGNED NOT NULL,
