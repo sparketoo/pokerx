@@ -487,7 +487,25 @@ final class ProtoHttpProvider extends BaseProvider
                 ];
             }
         }
-        foreach ($game->events->sortBy('timestamp') as $event) {
+        $handEvents = $game->events->sortBy('timestamp')->values()->all();
+        // YW may reveal Hero's cards only on their turn; Proto expects cards before preflop actions.
+        if ($game->network->isYw()) {
+            $firstActionIndex = null;
+            $dealtIndex = null;
+            foreach ($handEvents as $index => $event) {
+                if ($firstActionIndex === null && $event->type->isAction()) {
+                    $firstActionIndex = $index;
+                }
+                if ($dealtIndex === null && $event->type->isDealt()) {
+                    $dealtIndex = $index;
+                }
+            }
+            if ($firstActionIndex !== null && $dealtIndex !== null && $firstActionIndex < $dealtIndex) {
+                $dealt = array_splice($handEvents, $dealtIndex, 1);
+                array_splice($handEvents, $firstActionIndex, 0, $dealt);
+            }
+        }
+        foreach ($handEvents as $event) {
             if ($event->type->isBlindPosted()) {
                 $events[] = [
                     'eventType' => 'blindPosted',

@@ -787,6 +787,72 @@ final class ProtoHttpProviderTest extends TestCase
         ], $posted);
     }
 
+    public function test_yw_places_late_hero_cards_before_preflop_actions_in_proto_messages(): void
+    {
+        $game = new GameVo(1, '12345678-90ab-4cde-8f01-23456789abd0', NetworkEnum::YW, '36016#hand-1', 20, 10, 40, [
+            ['uid' => 'small', 'seat' => 1, 'stack' => 1000, 'hero' => false],
+            ['uid' => 'big', 'seat' => 2, 'stack' => 1000, 'hero' => false],
+            ['uid' => 'straddle', 'seat' => 3, 'stack' => 1000, 'hero' => false],
+            ['uid' => 'caller', 'seat' => 4, 'stack' => 1000, 'hero' => false],
+            ['uid' => 'hero', 'seat' => 5, 'stack' => 1000, 'hero' => true],
+        ], 5, 'client-a');
+        $game->event(GameEventTypeEnum::BLIND_POSTED, ['uid' => 'small', 'type' => 'SB', 'amount' => 10], 1);
+        $game->event(GameEventTypeEnum::BLIND_POSTED, ['uid' => 'big', 'type' => 'BB', 'amount' => 20], 2);
+        $game->event(GameEventTypeEnum::BLIND_POSTED, ['uid' => 'straddle', 'type' => 'STRADDLE', 'amount' => 40], 3);
+        $game->event(GameEventTypeEnum::STAGE, ['stage' => 'PREFLOP', 'cards' => []], 4);
+        $game->event(GameEventTypeEnum::ACTION, ['uid' => 'caller', 'action' => 'CALL', 'amount' => 40], 5);
+        $game->event(GameEventTypeEnum::DEALT, ['cards' => ['Qs', 'Jc']], 6);
+        $provider = new ProtoHttpProvider(['url' => 'https://proto.example']);
+
+        $events = $provider->gameEvents($game)['events'];
+        self::assertSame([
+            ['eventType' => 'stageStarted', 'stage' => 'preflop', 'cards' => ''],
+            ['eventType' => 'handDealt', 'name' => 'hero', 'cards' => 'Qs,Jc'],
+            ['eventType' => 'playerActed', 'name' => 'caller', 'action' => 'call', 'amount' => 40],
+        ], array_slice($events, -3));
+        self::assertSame(['ACTION', 'DEALT'], array_map(
+            static fn (GameEventVo $event): string => $event->type->name,
+            array_slice($game->events->all(), -2),
+        ));
+
+        $game->event(GameEventTypeEnum::OVER, ['winners' => [['uid' => 'hero', 'amount' => 310]]], 7);
+        $fullEvents = $provider->gameEvents($game, true)['events'];
+        $types = array_column($fullEvents, 'eventType');
+        $stage = array_search('stageStarted', $types, true);
+        if ($stage === false) {
+            self::fail('Expected preflop stage in full game log');
+        }
+        self::assertSame(['stageStarted', 'handDealt', 'playerActed'], array_slice($types, $stage, 3));
+    }
+
+    public function test_non_yw_keeps_late_hero_cards_in_observed_order(): void
+    {
+        $game = $this->game();
+        $game->event(GameEventTypeEnum::STAGE, ['stage' => 'PREFLOP', 'cards' => []], 1);
+        $game->event(GameEventTypeEnum::ACTION, ['uid' => 'villain-1', 'action' => 'CALL', 'amount' => 100], 2);
+        $game->event(GameEventTypeEnum::DEALT, ['cards' => ['Qs', 'Jc']], 3);
+        $provider = new ProtoHttpProvider(['url' => 'https://proto.example']);
+
+        self::assertSame(['stageStarted', 'playerActed', 'handDealt'], array_slice(
+            array_column($provider->gameEvents($game)['events'], 'eventType'), -3,
+        ));
+    }
+
+    public function test_yw_does_not_invent_hero_cards_when_they_were_not_observed(): void
+    {
+        $game = new GameVo(1, '12345678-90ab-4cde-8f01-23456789abd1', NetworkEnum::YW, '36016#hand-2', 20, 10, 0, [
+            ['uid' => 'hero', 'seat' => 1, 'stack' => 1000, 'hero' => true],
+            ['uid' => 'villain', 'seat' => 2, 'stack' => 1000, 'hero' => false],
+        ], 1, 'client-a');
+        $game->event(GameEventTypeEnum::STAGE, ['stage' => 'PREFLOP', 'cards' => []], 1);
+        $game->event(GameEventTypeEnum::ACTION, ['uid' => 'villain', 'action' => 'FOLD', 'amount' => 0], 2);
+        $provider = new ProtoHttpProvider(['url' => 'https://proto.example']);
+
+        self::assertSame(['stageStarted', 'playerActed'], array_slice(
+            array_column($provider->gameEvents($game)['events'], 'eventType'), -2,
+        ));
+    }
+
     public function test_straddle_keeps_broadcast_order_and_returns_are_included_in_full_game_log_wins(): void
     {
         $game = $this->game();
