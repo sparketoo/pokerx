@@ -33,7 +33,6 @@ use Hyperf\Database\Model\Relations\HasMany;
  * @property User $user 所属用户
  * @property Collection<int, GamePlayer> $gamePlayers 游戏玩家列表
  * @property Collection<int, GameEvent> $events 游戏事件列表
- * @property Collection<int, GameInsurance> $gameInsurances 保险流水
  */
 class Game extends Model
 {
@@ -65,12 +64,6 @@ class Game extends Model
     public function events(): HasMany
     {
         return $this->hasMany(GameEvent::class);
-    }
-
-    /** @return HasMany<GameInsurance, static> */
-    public function gameInsurances(): HasMany
-    {
-        return $this->hasMany(GameInsurance::class);
     }
 
     public function hero(): GamePlayer

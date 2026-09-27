@@ -6,10 +6,10 @@ namespace Tests\Feature\Service;
 
 use App\Enum\GameEventTypeEnum;
 use App\Game\GameProviderManager;
+use App\Model\GameEvent;
 use App\Service\GameService;
 use Hyperf\AsyncQueue\Driver\DriverFactory;
 use Hyperf\Context\ApplicationContext;
-use Hyperf\DbConnection\Db;
 use Hyperf\Redis\Redis;
 use Psr\Log\LoggerInterface;
 use Tests\Fixtures\GameVoFixture;
@@ -17,7 +17,7 @@ use Tests\Support\DatabaseTestCase;
 
 final class GameServiceTest extends DatabaseTestCase
 {
-    public function test_store_persists_insurance_ledger_and_profit(): void
+    public function test_store_persists_insurance_events_and_profit(): void
     {
         $container = ApplicationContext::getContainer();
         $service = new GameService(
@@ -44,8 +44,24 @@ final class GameServiceTest extends DatabaseTestCase
         self::assertSame(60, $record->insurance_amount);
         self::assertSame(100, $record->insurance_payout);
         self::assertSame(30, $record->profit);
-        self::assertSame(['PURCHASE', 'PURCHASE', 'PAYOUT'], Db::table('game_insurances')->where('game_id', $record->id)->orderBy('id')->pluck('type')->all());
-        self::assertSame([1, 2, null], Db::table('game_insurances')->where('game_id', $record->id)->orderBy('id')->pluck('pot_id')->all());
-        self::assertSame(1, Db::table('game_insurances')->where('game_id', $record->id)->where('payout', 100)->count());
+        $events = GameEvent::query()->where('game_id', $record->id)->orderBy('id')->get();
+        $types = [];
+        $payloads = [];
+        foreach ($events as $event) {
+            self::assertInstanceOf(GameEvent::class, $event);
+            $types[] = $event->type->name;
+            $payloads[] = $event->payload;
+        }
+        self::assertSame(['STAGE', 'INSURANCE_PURCHASED', 'INSURANCE_PURCHASED', 'OVER'], $types);
+        $firstPurchase = $payloads[1];
+        $secondPurchase = $payloads[2];
+        $over = $payloads[3];
+        self::assertSame(['FLOP', 1, '2.50', 40], [$firstPurchase['stage'], $firstPurchase['pot_id'], $firstPurchase['odds'], $firstPurchase['amount']]);
+        self::assertSame(['FLOP', 2, '3.00', 20], [$secondPurchase['stage'], $secondPurchase['pot_id'], $secondPurchase['odds'], $secondPurchase['amount']]);
+        self::assertSame(100, $over['insurance_payout']);
+
+        $storedAgain = $service->store($game);
+        self::assertSame($record->id, $storedAgain?->id);
+        self::assertSame(4, GameEvent::query()->where('game_id', $record->id)->count());
     }
 }

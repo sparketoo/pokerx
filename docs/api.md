@@ -435,7 +435,7 @@ UID 不区分大小写；例如 `Aa1001` 与 `aA1001` 指向同一玩家。新�
 
 `uid` 必须是本手 Hero；`stage` 为当前 `FLOP` 或 `TURN`；`pot_id` 是游戏平台的保险标识，为非负整数，不能据此推断主池或边池；`odds` 是正数数字字符串，最多两位小数；`amount` 是 1–100000000 的 JSON 整数，表示实际支付的保费。同一手中 `(stage, pot_id)` 标识一笔购买，完全相同的重复上报返回成功且不重复计费，内容冲突则返回 `event_invalid`。不同阶段可复用同一 `pot_id`。
 
-保险实际赔付随 `OVER.payload.insurance_payout` 一起上报，不发送单独的赔付事件。该金额不按 `pot_id` 强行分摊。保险购买、实际赔付分别计入 `games.insurance_amount` 和 `games.insurance_payout`，牌局收益为 `winnings - total - insurance_amount + insurance_payout`。OK 的逐街结果须由客户端合计成最终实际赔付；YW 成交识别与净收益换算仍待对应抓包证据验证。
+保险购买记录为 `game_events` 中的 `INSURANCE_PURCHASED` 事件；实际赔付记录在同表的 `OVER.payload.insurance_payout`，不发送单独的赔付事件。赔付金额不按 `pot_id` 强行分摊。保险购买、实际赔付分别计入 `games.insurance_amount` 和 `games.insurance_payout`，牌局收益为 `winnings - total - insurance_amount + insurance_payout`。OK 的逐街结果须由客户端合计成最终实际赔付；YW 成交识别与净收益换算仍待对应抓包证据验证。
 
 客户端应等待本手全部 `INSURANCE_PURCHASED.ACK` 后再发送 `OVER`；若 `OVER` 先完成，后到的购买会因牌局已结束而失败。
 

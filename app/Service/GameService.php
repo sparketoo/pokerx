@@ -12,7 +12,6 @@ use App\Game\GameProviderManager;
 use App\Job\GameStoreJob;
 use App\Model\Game;
 use App\Model\GameEvent;
-use App\Model\GameInsurance;
 use App\Model\GamePlayer;
 use App\Vo\Game\CardVo;
 use App\Vo\Game\GameEventVo;
@@ -190,10 +189,9 @@ LUA;
     {
         $playerRows = $this->playerRows($game);
         $eventRows = $this->eventRows($game);
-        $insuranceRows = $this->insuranceRows($game);
         $attempt = 0;
 
-        return Db::transaction(function () use ($game, $playerRows, $eventRows, $insuranceRows, &$attempt): Game {
+        return Db::transaction(function () use ($game, $playerRows, $eventRows, &$attempt): Game {
             if ($attempt++ > 0) {
                 Coroutine::sleep(random_int(20, 50) * ($attempt - 1) / 1000);
             }
@@ -231,7 +229,6 @@ LUA;
             if (! $isNew) {
                 $record->gamePlayers()->delete();
                 $record->events()->delete();
-                $record->gameInsurances()->delete();
             }
             GamePlayer::query()->insert(array_map(
                 static fn (array $row): array => ['game_id' => $record->id, ...$row],
@@ -241,12 +238,6 @@ LUA;
                 static fn (array $row): array => ['game_id' => $record->id, ...$row],
                 $eventRows,
             ));
-            if ($insuranceRows !== []) {
-                GameInsurance::query()->insert(array_map(
-                    static fn (array $row): array => ['game_id' => $record->id, ...$row],
-                    $insuranceRows,
-                ));
-            }
 
             return $record;
         }, self::STORE_TRANSACTION_ATTEMPTS);
@@ -292,37 +283,6 @@ LUA;
                 'type' => $event->type->name,
                 'timestamp' => $event->timestamp,
                 'payload' => $event->payload,
-                'created_at' => Carbon::createFromTimestampMs($event->timestamp, appTimezone()),
-                'updated_at' => $now,
-            ]);
-            $rows[] = $row->getAttributes();
-        }
-
-        return $rows;
-    }
-
-    /** @return list<array<string, mixed>> */
-    private function insuranceRows(GameVo $game): array
-    {
-        $rows = [];
-        $now = Carbon::now();
-        foreach ($game->events as $event) {
-            if (! $event->type->isInsurancePurchased()
-                && (! $event->type->isOver() || ! array_key_exists('insurance_payout', $event->payload))) {
-                continue;
-            }
-            $purchase = $event->type->isInsurancePurchased();
-            $payload = $event->payload;
-            $row = new GameInsurance;
-            $row->fill([
-                'record_key' => $purchase ? $payload['stage'].':'.$payload['pot_id'] : 'PAYOUT',
-                'type' => $purchase ? 'PURCHASE' : 'PAYOUT',
-                'stage' => $payload['stage'] ?? null,
-                'pot_id' => $purchase ? $payload['pot_id'] : null,
-                'odds' => $purchase ? $payload['odds'] : null,
-                'amount' => $purchase ? $payload['amount'] : 0,
-                'payout' => $purchase ? 0 : $payload['insurance_payout'],
-                'timestamp' => $event->timestamp,
                 'created_at' => Carbon::createFromTimestampMs($event->timestamp, appTimezone()),
                 'updated_at' => $now,
             ]);

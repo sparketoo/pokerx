@@ -114,26 +114,11 @@ abstract class DatabaseTestCase extends TestCase
             created_at TIMESTAMP(6) NULL,
             updated_at TIMESTAMP(6) NULL
         )");
-        Db::statement('CREATE TEMPORARY TABLE game_insurances (
-            id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
-            game_id BIGINT UNSIGNED NOT NULL,
-            record_key VARCHAR(32) NOT NULL,
-            type ENUM(\'PURCHASE\',\'PAYOUT\') NOT NULL,
-            stage ENUM(\'FLOP\',\'TURN\') NULL,
-            pot_id BIGINT UNSIGNED NULL,
-            odds DECIMAL(12,2) NULL,
-            amount BIGINT UNSIGNED NOT NULL DEFAULT 0,
-            payout BIGINT UNSIGNED NOT NULL DEFAULT 0,
-            timestamp BIGINT UNSIGNED NOT NULL,
-            created_at TIMESTAMP(6) NULL,
-            updated_at TIMESTAMP(6) NULL,
-            UNIQUE KEY game_insurances_record_unique (game_id, record_key)
-        )');
     }
 
     protected function tearDown(): void
     {
-        foreach (['game_insurances', 'game_events', 'game_players', 'games', 'user_tokens', 'users'] as $table) {
+        foreach (['game_events', 'game_players', 'games', 'user_tokens', 'users'] as $table) {
             Db::statement('DROP TEMPORARY TABLE IF EXISTS '.$table);
         }
         Context::set(User::class, $this->previousUser);
