@@ -12,6 +12,7 @@ use App\Game\GameProviderManager;
 use App\Job\GameStoreJob;
 use App\Model\Game;
 use App\Model\GameEvent;
+use App\Model\GameInsurance;
 use App\Model\GamePlayer;
 use App\Vo\Game\CardVo;
 use App\Vo\Game\GameEventVo;
@@ -31,6 +32,16 @@ use function Hyperf\Translation\__;
 final class GameService
 {
     private const int STORE_TRANSACTION_ATTEMPTS = 3;
+
+    private const int EVENT_UPDATE_ATTEMPTS = 12;
+
+    private const string UPDATE_GAME_SCRIPT = <<<'LUA'
+if redis.call('GET', KEYS[1]) == ARGV[1] then
+    redis.call('SETEX', KEYS[1], 3600, ARGV[2])
+    return 1
+end
+return 0
+LUA;
 
     public function __construct(
         protected readonly GameProviderManager $pokerManager,
@@ -134,15 +145,39 @@ final class GameService
         int $userId,
         string $clientId,
     ): GameEventVo {
-        $game = $this->findForClient($uuid, $userId, $clientId);
-        $event = $game->event(
-            $type,
-            $payload,
-            $timestamp,
-        );
-        $this->save($game);
+        $key = 'game:'.$uuid;
+        for ($attempt = 0; $attempt < self::EVENT_UPDATE_ATTEMPTS; $attempt++) {
+            $previous = $this->redis->get($key);
+            if (! is_string($previous)) {
+                throw new GameException(__('messages.game.not_found'), ErrorCode::GAME_NOT_FOUND, ['uuid' => $uuid]);
+            }
+            try {
+                $game = unserialize($previous);
+            } catch (Throwable) {
+                throw new GameException(__('messages.game.not_found'), ErrorCode::GAME_NOT_FOUND, ['uuid' => $uuid]);
+            }
+            if (! $game instanceof GameVo || $game->userId !== $userId
+                || $game->clientId !== $clientId) {
+                throw new GameException(__('messages.game.not_found'), ErrorCode::GAME_NOT_FOUND, ['uuid' => $uuid]);
+            }
+            $count = $game->events->count();
+            $event = $game->event($type, $payload, $timestamp);
+            if ($game->events->count() === $count) {
+                return $event;
+            }
+            // 所有事件共用 CAS，避免另一个 Worker 的普通牌局事件覆盖保险流水。
+            if ($this->redis->eval(self::UPDATE_GAME_SCRIPT, [$key, $previous, serialize($game)], 1) === 1) {
+                return $event;
+            }
+        }
 
-        return $event;
+        throw new GameException(__('messages.game.event_invalid'), ErrorCode::EVENT_INVALID);
+    }
+
+    /** @param array<string, mixed> $payload */
+    public function purchaseInsurance(string $uuid, array $payload, int $timestamp, int $userId, string $clientId): GameEventVo
+    {
+        return $this->event($uuid, GameEventTypeEnum::INSURANCE_PURCHASED, $payload, $timestamp, $userId, $clientId);
     }
 
     public function queueToStore(GameVo $game, int $delay = 0): void
@@ -155,9 +190,10 @@ final class GameService
     {
         $playerRows = $this->playerRows($game);
         $eventRows = $this->eventRows($game);
+        $insuranceRows = $this->insuranceRows($game);
         $attempt = 0;
 
-        return Db::transaction(function () use ($game, $playerRows, $eventRows, &$attempt): Game {
+        return Db::transaction(function () use ($game, $playerRows, $eventRows, $insuranceRows, &$attempt): Game {
             if ($attempt++ > 0) {
                 Coroutine::sleep(random_int(20, 50) * ($attempt - 1) / 1000);
             }
@@ -183,7 +219,9 @@ final class GameService
                 'pot' => $game->pot(),
                 'total' => $hero->total(),
                 'winnings' => $hero->winnings,
-                'profit' => $hero->winnings - $hero->total(),
+                'insurance_amount' => $game->insuranceAmount(),
+                'insurance_payout' => $game->insurancePayout(),
+                'profit' => $hero->winnings - $hero->total() - $game->insuranceAmount() + $game->insurancePayout(),
             ]);
             if (! $record->exists) {
                 $record->created_at = Carbon::createFromTimestampMs($game->createdAtMs, appTimezone());
@@ -193,6 +231,7 @@ final class GameService
             if (! $isNew) {
                 $record->gamePlayers()->delete();
                 $record->events()->delete();
+                $record->gameInsurances()->delete();
             }
             GamePlayer::query()->insert(array_map(
                 static fn (array $row): array => ['game_id' => $record->id, ...$row],
@@ -202,6 +241,12 @@ final class GameService
                 static fn (array $row): array => ['game_id' => $record->id, ...$row],
                 $eventRows,
             ));
+            if ($insuranceRows !== []) {
+                GameInsurance::query()->insert(array_map(
+                    static fn (array $row): array => ['game_id' => $record->id, ...$row],
+                    $insuranceRows,
+                ));
+            }
 
             return $record;
         }, self::STORE_TRANSACTION_ATTEMPTS);
@@ -247,6 +292,37 @@ final class GameService
                 'type' => $event->type->name,
                 'timestamp' => $event->timestamp,
                 'payload' => $event->payload,
+                'created_at' => Carbon::createFromTimestampMs($event->timestamp, appTimezone()),
+                'updated_at' => $now,
+            ]);
+            $rows[] = $row->getAttributes();
+        }
+
+        return $rows;
+    }
+
+    /** @return list<array<string, mixed>> */
+    private function insuranceRows(GameVo $game): array
+    {
+        $rows = [];
+        $now = Carbon::now();
+        foreach ($game->events as $event) {
+            if (! $event->type->isInsurancePurchased()
+                && (! $event->type->isOver() || ! array_key_exists('insurance_payout', $event->payload))) {
+                continue;
+            }
+            $purchase = $event->type->isInsurancePurchased();
+            $payload = $event->payload;
+            $row = new GameInsurance;
+            $row->fill([
+                'record_key' => $purchase ? $payload['stage'].':'.$payload['pot_id'] : 'PAYOUT',
+                'type' => $purchase ? 'PURCHASE' : 'PAYOUT',
+                'stage' => $payload['stage'] ?? null,
+                'pot_id' => $purchase ? $payload['pot_id'] : null,
+                'odds' => $purchase ? $payload['odds'] : null,
+                'amount' => $purchase ? $payload['amount'] : 0,
+                'payout' => $purchase ? 0 : $payload['insurance_payout'],
+                'timestamp' => $event->timestamp,
                 'created_at' => Carbon::createFromTimestampMs($event->timestamp, appTimezone()),
                 'updated_at' => $now,
             ]);

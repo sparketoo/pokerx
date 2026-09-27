@@ -16,6 +16,71 @@ use Tests\TestCase;
 
 final class GameVoTest extends TestCase
 {
+    public function test_insurance_purchases_deduplicate_by_stage_and_pot_id(): void
+    {
+        $game = GameVoFixture::headsUp();
+        $game->event(GameEventTypeEnum::STAGE, ['stage' => 'FLOP', 'cards' => ['As', 'Kh', 'Qd']], 1);
+        $purchase = ['uid' => 'hero', 'stage' => 'FLOP', 'pot_id' => 1, 'odds' => '2.50', 'amount' => 40];
+        $first = $game->event(GameEventTypeEnum::INSURANCE_PURCHASED, $purchase, 2);
+        self::assertSame($first, $game->event(GameEventTypeEnum::INSURANCE_PURCHASED, $purchase, 3));
+        self::assertSame($first, $game->event(GameEventTypeEnum::INSURANCE_PURCHASED, [
+            'amount' => 40, 'odds' => '2.50', 'pot_id' => 1, 'stage' => 'FLOP', 'uid' => 'hero',
+        ], 3));
+        $game->event(GameEventTypeEnum::STAGE, ['stage' => 'TURN', 'cards' => ['2c']], 4);
+        self::assertSame($first, $game->event(GameEventTypeEnum::INSURANCE_PURCHASED, $purchase, 5));
+        $game->event(GameEventTypeEnum::INSURANCE_PURCHASED, [
+            'uid' => 'hero', 'stage' => 'TURN', 'pot_id' => 1, 'odds' => '3.00', 'amount' => 20,
+        ], 6);
+
+        self::assertSame(60, $game->insuranceAmount());
+        self::assertCount(4, $game->events);
+    }
+
+    public function test_over_records_insurance_payout_without_another_event(): void
+    {
+        $game = GameVoFixture::headsUp();
+        $game->event(GameEventTypeEnum::STAGE, ['stage' => 'FLOP', 'cards' => ['As', 'Kh', 'Qd']], 1);
+        $game->event(GameEventTypeEnum::INSURANCE_PURCHASED, [
+            'uid' => 'hero', 'stage' => 'FLOP', 'pot_id' => 1, 'odds' => '2.50', 'amount' => 40,
+        ], 2);
+        $over = $game->event(GameEventTypeEnum::OVER, [
+            'winners' => [['uid' => 'villain', 'amount' => 100]], 'insurance_payout' => 100,
+        ], 3);
+
+        self::assertSame(100, $game->insurancePayout());
+        self::assertSame(100, $over->payload['insurance_payout']);
+        self::assertCount(3, $game->events);
+    }
+
+    public function test_insurance_rejects_conflicting_purchase(): void
+    {
+        $game = GameVoFixture::headsUp();
+        $game->event(GameEventTypeEnum::STAGE, ['stage' => 'FLOP', 'cards' => ['As', 'Kh', 'Qd']], 1);
+        $purchase = ['uid' => 'hero', 'stage' => 'FLOP', 'pot_id' => 1, 'odds' => '2.50', 'amount' => 40];
+        $game->event(GameEventTypeEnum::INSURANCE_PURCHASED, $purchase, 2);
+
+        try {
+            $game->event(GameEventTypeEnum::INSURANCE_PURCHASED, [...$purchase, 'amount' => 50], 3);
+            self::fail('A changed purchase must not reuse the same stage and pot ID.');
+        } catch (GameException) {
+            self::assertSame(40, $game->insuranceAmount());
+        }
+        self::assertSame(2, $game->events->count());
+    }
+
+    public function test_over_rejects_negative_insurance_payout(): void
+    {
+        $game = GameVoFixture::headsUp();
+        $game->event(GameEventTypeEnum::STAGE, ['stage' => 'FLOP', 'cards' => ['As', 'Kh', 'Qd']], 1);
+        $game->event(GameEventTypeEnum::INSURANCE_PURCHASED, [
+            'uid' => 'hero', 'stage' => 'FLOP', 'pot_id' => 1, 'odds' => '2.50', 'amount' => 40,
+        ], 2);
+        $this->expectException(GameException::class);
+        $game->event(GameEventTypeEnum::OVER, [
+            'winners' => [['uid' => 'villain', 'amount' => 100]], 'insurance_payout' => -1,
+        ], 3);
+    }
+
     public function test_blinds_are_recorded_only_when_posted(): void
     {
         $game = GameVoFixture::headsUp();

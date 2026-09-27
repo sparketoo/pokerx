@@ -2,6 +2,8 @@
 
 Before changing a file, read the matching rules below and `AGENTS.md`. Paths refer to this Hyperf repository; rules for optional modules apply only when that module exists or is part of the requested work.
 
+The coding rule also covers minimal implementation, requested scope, framework architecture, clear responsibilities, human readability, and Chinese comments for critical constraints.
+
 | Applies to | Rule file |
 | --- | --- |
 | `**/*.php` | `.agents/rules/coding.md` |

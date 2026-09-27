@@ -168,7 +168,7 @@ HTTP 的通用错误码包括 `auth_failed`、`auth_required`、`two_factor_requ
 | `provider`、`players` | string、integer | 决策服务标识、玩家数                                                                      |
 | `status` | string | `OPEN`、`OVER`、`ABORT`、`CLOSED`                                                  |
 | `big_blind`、`small_blind`、`ante` | integer | 大盲、小盲、前注                                                                        |
-| `pot`、`total`、`winnings`、`profit` | integer | 最终底池、Hero 净投入、Hero 实际奖金、Hero 净收益；`pot` 和 `total` 已扣除 `returns`，`winnings` 不含退回额 |
+| `pot`、`total`、`winnings`、`insurance_amount`、`insurance_payout`、`profit` | integer | 最终底池、Hero 净投入、实际奖金、保险购买总额、保险实际赔付总额、净收益；`profit = winnings - total - insurance_amount + insurance_payout` |
 | `created_at`、`updated_at` | ISO 8601 string | 创建及更新时间                                                                         |
 
 `GET /api/mine/games/detail?game_id=<uuid>` 的 `game_id` 必须是有效的 UUID。成功 `data` 为：
@@ -180,7 +180,7 @@ HTTP 的通用错误码包括 `auth_failed`、`auth_required`、`two_factor_requ
     "network":"WE","game_key":"table-42#1",
     "provider":"mock","players":2,"status":"OVER",
     "big_blind":100,"small_blind":50,"ante":0,
-    "pot":300,"total":150,"winnings":200,"profit":50,
+    "pot":300,"total":150,"winnings":200,"insurance_amount":0,"insurance_payout":0,"profit":50,
     "created_at":"2026-09-23T12:00:00+08:00",
     "updated_at":"2026-09-23T12:01:00+08:00",
     "gamePlayers":[
@@ -214,7 +214,7 @@ HTTP 的通用错误码包括 `auth_failed`、`auth_required`、`two_factor_requ
 
 `GET /api/mine/events` 跨牌局搜索当前用户的事件。可选 `keyword`（最多 100 字符，搜索事件类型和载荷文本）、`limit`（默认 50，1–100）、`order`（默认 `desc`）、`cursor`（最长 4096 字符）。
 
-两种事件接口均返回 `items`（事件对象数组）和 `next_cursor`（字符串或 `null`）。每个事件对象包含 `id`、`user_id`、`game_id`（字符串），`type`（`BLIND_POSTED`、`STAGE`、`DEALT`、`ACTION`、`SHOW`、`OVER` 或 `ABORT`），`timestamp`（原始 Unix 毫秒时间戳）、`payload`（原始消息载荷对象）、`created_at`、`updated_at`。`/api/mine/events` 中的每项另含 `game` 简要对象：`id`、`uuid`、`game_key`、`network`。`START` 不作为独立事件保存；它建立牌局和玩家记录。
+两种事件接口均返回 `items`（事件对象数组）和 `next_cursor`（字符串或 `null`）。每个事件对象包含 `id`、`user_id`、`game_id`（字符串），`type`（`BLIND_POSTED`、`STAGE`、`DEALT`、`ACTION`、`SHOW`、`INSURANCE_PURCHASED`、`OVER` 或 `ABORT`），`timestamp`（原始 Unix 毫秒时间戳）、`payload`（原始消息载荷对象）、`created_at`、`updated_at`。`/api/mine/events` 中的每项另含 `game` 简要对象：`id`、`uuid`、`game_key`、`network`。`START` 不作为独立事件保存；它建立牌局和玩家记录。
 
 ### 2.8 游戏配置
 
@@ -298,7 +298,7 @@ HTTP 的通用错误码包括 `auth_failed`、`auth_required`、`two_factor_requ
 }
 ```
 
-`id` 为服务端生成的消息 ID；应答消息的 `reply_to` 对应客户端的 `id`。认证成功后主动发送的 `ACCEPT` 使用相同信封，`reply_to: null`，`payload` 含服务端签发的 `client_id`，不对应任何客户端请求。`PING` 和每个业务事件成功处理后都返回对应的 `<请求 type>.ACK`；校验或处理失败时返回 `error`。`REQUEST_ACTION` 的结果可能稍后返回，也可能因决策失败返回 `error`。客户端应按 `reply_to` 匹配响应。客户端消息 `id` 只用于关联响应，**不是幂等键**；重复发送业务事件可能重复计入牌局。协议没有定义自动重发或去重确认；不要把未收到回复的消息直接当作已经成功处理。
+`id` 为服务端生成的消息 ID；应答消息的 `reply_to` 对应客户端的 `id`。认证成功后主动发送的 `ACCEPT` 使用相同信封，`reply_to: null`，`payload` 含服务端签发的 `client_id`，不对应任何客户端请求。`PING` 和每个业务事件成功处理后都返回对应的 `<请求 type>.ACK`；校验或处理失败时返回 `error`。`REQUEST_ACTION` 的结果可能稍后返回，也可能因决策失败返回 `error`。客户端应按 `reply_to` 匹配响应。客户端消息 `id` 只用于关联响应，**不是幂等键**；`INSURANCE_PURCHASED` 按本节规定的业务字段去重，其余业务事件重复发送仍可能重复计入牌局。
 
 | 客户端 `type` | 用途 | 成功处理时的回复 |
 | --- | --- | --- |
@@ -311,6 +311,7 @@ HTTP 的通用错误码包括 `auth_failed`、`auth_required`、`two_factor_requ
 | `SHOW` | 报告已知玩家手牌 | `SHOW.ACK`，`payload: []` |
 | `REQUEST_ACTION` | 请求 Hero 下一步建议 | `REQUEST_ACTION.ACK`，返回行动与金额 |
 | `REQUEST_INSURANCE` | 根据保险报价与用户配置请求投保额建议 | `REQUEST_INSURANCE.ACK`，返回 `amount`（整数或 `null`） |
+| `INSURANCE_PURCHASED` | 上报 Hero 已确认购买的保险 | `INSURANCE_PURCHASED.ACK`，`payload: []` |
 | `OVER` | 正常结束并提交结果 | `OVER.ACK`，`payload: []` |
 | `ABORT` | 中止牌局 | `ABORT.ACK`，`payload: []` |
 
@@ -424,7 +425,21 @@ UID 不区分大小写；例如 `Aa1001` 与 `aA1001` 指向同一玩家。新�
 
 此消息只计算并返回投保额建议，不执行买保险，也不保存购买记录。字段不符合校验规则时返回 `error`（`event_invalid`），牌局 UUID 未找到时返回 `game_uuid_not_found`。
 
-### 3.6 `OVER` 与 `ABORT`：结束牌局
+### 3.6 保险购买上报
+
+`REQUEST_INSURANCE` 只是建议。游戏平台确认购买后，客户端才发送 `INSURANCE_PURCHASED`：
+
+```json
+{"id":"buy-1","type":"INSURANCE_PURCHASED","timestamp":1790136001700,"payload":{"game_uuid":"12345678-90ab-4cde-8f01-23456789abcd","uid":"aA1001","stage":"FLOP","pot_id":1,"odds":"2.50","amount":40}}
+```
+
+`uid` 必须是本手 Hero；`stage` 为当前 `FLOP` 或 `TURN`；`pot_id` 是游戏平台的保险标识，为非负整数，不能据此推断主池或边池；`odds` 是正数数字字符串，最多两位小数；`amount` 是 1–100000000 的 JSON 整数，表示实际支付的保费。同一手中 `(stage, pot_id)` 标识一笔购买，完全相同的重复上报返回成功且不重复计费，内容冲突则返回 `event_invalid`。不同阶段可复用同一 `pot_id`。
+
+保险实际赔付随 `OVER.payload.insurance_payout` 一起上报，不发送单独的赔付事件。该金额不按 `pot_id` 强行分摊。保险购买、实际赔付分别计入 `games.insurance_amount` 和 `games.insurance_payout`，牌局收益为 `winnings - total - insurance_amount + insurance_payout`。OK 的逐街结果须由客户端合计成最终实际赔付；YW 成交识别与净收益换算仍待对应抓包证据验证。
+
+客户端应等待本手全部 `INSURANCE_PURCHASED.ACK` 后再发送 `OVER`；若 `OVER` 先完成，后到的购买会因牌局已结束而失败。
+
+### 3.7 `OVER` 与 `ABORT`：结束牌局
 
 正常结束：
 
@@ -433,6 +448,7 @@ UID 不区分大小写；例如 `Aa1001` 与 `aA1001` 指向同一玩家。新�
   "id":"9","type":"OVER","timestamp":1790136002000,
   "payload":{
     "game_uuid":"12345678-90ab-4cde-8f01-23456789abcd",
+    "insurance_payout":0,
     "winners":[{"uid":"aA1001","amount":200}],
     "returns":[{"uid":"Bb1002","amount":7}],
     "shown":[{"uid":"aA1001","cards":["As","Kh"]}]
@@ -443,6 +459,7 @@ UID 不区分大小写；例如 `Aa1001` 与 `aA1001` 指向同一玩家。新�
 | 字段 | 约束及含义 |
 | --- | --- |
 | `game_uuid` | 必填，有效的 UUID（36 字符，含连字符） |
+| `insurance_payout` | 可选，0–1000000000000 的 JSON 整数；本手保险实际赔付总额，未命中时为 `0`；省略时按 `0` 计入收益 |
 | `winners` | 必填、非空数组；每项有 `uid`（牌局中玩家的 1–16 位字母或数字字符串，不区分大小写且不能重复）和 `amount`（0–100000000 的 JSON 整数），表示该玩家实际获得的奖金，不含退回筹码 |
 | `returns` | 可选数组；每项有 `uid`（牌局中玩家的 1–16 位字母或数字字符串，数组内不区分大小写且不能重复）和 `amount`（1–100000000 的正 JSON 整数），表示本手未被跟注而退回的筹码，不得超过该玩家累计投入；不退回时可省略 |
 | `shown` | 可选数组；每项有 `uid`（牌局中玩家的 1–16 位字母或数字字符串）和恰好 2 张牌的 `cards` |
@@ -453,11 +470,11 @@ UID 不区分大小写；例如 `Aa1001` 与 `aA1001` 指向同一玩家。新�
 {"id":"10","type":"ABORT","timestamp":1790136002500,"payload":{"game_uuid":"12345678-90ab-4cde-8f01-23456789abcd"}}
 ```
 
-`OVER` 中 `returns` 会从玩家及牌局最终投入扣除，`winners` 仍表示实际奖金；向 Proto 提交 `fullGameLog` 时，对每个玩家发送的 `playerWon.amount` 为实际奖金加退回额，只有退回额的玩家也会发送。
+`OVER` 中 `returns` 会从玩家及牌局最终投入扣除，`winners` 仍表示实际奖金；`insurance_payout` 与 `OVER` 在同一次牌局事件更新中保存。向 Proto 提交 `fullGameLog` 时，对每个玩家发送的 `playerWon.amount` 为实际奖金加退回额，只有退回额的玩家也会发送。
 
 `OVER.ACK` 和 `ABORT.ACK` 均返回 `payload: []`；收到回复表示结束事件已处理且保存任务已提交，数据库保存由异步队列完成。查询历史牌局时可能需要等待保存完成。正常结束的状态为 `OVER`，提前终止的状态为 `ABORT`。
 
-### 3.7 WebSocket 错误
+### 3.8 WebSocket 错误
 
 错误帧示例：
 
@@ -473,7 +490,7 @@ UID 不区分大小写；例如 `Aa1001` 与 `aA1001` 指向同一玩家。新�
 
 常见错误码：`event_invalid`（信封或字段无效）、`event_type_invalid`、`game_already_exists`、`game_uuid_not_found`、`status_invalid`、`hero_not_found`、`big_blind_not_found`、`player_not_found`、`request_action_in_progress`、`provider_failed`、`action_amount_invalid`、`auth_required`、`server_error`。认证错误可能伴随连接关闭。客户端遇到 `error` 时应按 `reply_to` 识别失败的请求，并以 `code` 分支处理。
 
-### 3.8 典型调用顺序
+### 3.9 典型调用顺序
 
 ```text
 POST /api/auth/login  → 取得 token
@@ -487,6 +504,7 @@ ACTION(Hero 实际行动) → ACTION.ACK
 ACTION(对手行动)      → ACTION.ACK
 STAGE(FLOP, 三张牌)   → STAGE.ACK
 REQUEST_INSURANCE    → REQUEST_INSURANCE.ACK，读取投保额建议（出现保险报价时）
+INSURANCE_PURCHASED   → INSURANCE_PURCHASED.ACK，购买被平台确认后上报
 ...                  → 按实际牌局持续上报
 OVER 或 ABORT         → 对应 .ACK
 GET /api/mine/games/detail?game_id=<game_uuid> 查询保存结果

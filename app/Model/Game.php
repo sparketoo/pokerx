@@ -26,11 +26,14 @@ use Hyperf\Database\Model\Relations\HasMany;
  * @property GameStatusEnum $status 游戏状态
  * @property int $total 本人总下注金额：包含前注+盲注+主动下注
  * @property int $winnings 本人赢得奖金
- * @property int $profit 本人游戏收益：winnings-total
+ * @property int $profit 本人游戏收益：winnings-total-insurance_amount+insurance_payout
+ * @property int $insurance_amount 本人保险购买总金额
+ * @property int $insurance_payout 本人保险实际赔付总金额
  * @property int $pot 底池：主池+边池
  * @property User $user 所属用户
  * @property Collection<int, GamePlayer> $gamePlayers 游戏玩家列表
  * @property Collection<int, GameEvent> $events 游戏事件列表
+ * @property Collection<int, GameInsurance> $gameInsurances 保险流水
  */
 class Game extends Model
 {
@@ -47,6 +50,8 @@ class Game extends Model
         'total' => 'integer',
         'winnings' => 'integer',
         'profit' => 'integer',
+        'insurance_amount' => 'integer',
+        'insurance_payout' => 'integer',
         'pot' => 'integer',
     ];
 
@@ -60,6 +65,12 @@ class Game extends Model
     public function events(): HasMany
     {
         return $this->hasMany(GameEvent::class);
+    }
+
+    /** @return HasMany<GameInsurance, static> */
+    public function gameInsurances(): HasMany
+    {
+        return $this->hasMany(GameInsurance::class);
     }
 
     public function hero(): GamePlayer

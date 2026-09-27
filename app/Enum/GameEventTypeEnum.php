@@ -20,6 +20,8 @@ enum GameEventTypeEnum
     case ACTION;
     // 已知玩家底牌
     case SHOW;
+    // 本人确认购买保险
+    case INSURANCE_PURCHASED;
     // 游戏异常终止
     case ABORT;
     // 游戏正常结束
@@ -53,6 +55,11 @@ enum GameEventTypeEnum
     public function isShow(): bool
     {
         return $this->is(self::SHOW);
+    }
+
+    public function isInsurancePurchased(): bool
+    {
+        return $this->is(self::INSURANCE_PURCHASED);
     }
 
     public function isAbort(): bool

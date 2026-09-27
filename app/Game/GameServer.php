@@ -427,6 +427,31 @@ final class GameServer implements OnCloseInterface, OnMessageInterface, OnOpenIn
         ]);
     }
 
+    /**
+     * 仅接收游戏平台已确认成交的保险，不将报价或 REQUEST_INSURANCE 决策计为购买。
+     */
+    public function handleInsurancePurchased(GameServerMessageVo $message): void
+    {
+        $payload = $this->validatorFactory->make($message->payload, [
+            'game_uuid' => ['required', 'uuid'],
+            'uid' => ['required', 'string', 'regex:/\A[A-Za-z0-9]{1,16}\z/'],
+            'stage' => ['required', 'string', 'in:FLOP,TURN'],
+            'pot_id' => ['required', 'integer:strict', 'min:0'],
+            'odds' => ['required', 'string', 'regex:/\A[1-9][0-9]{0,9}(?:\.[0-9]{1,2})?\z/D'],
+            'amount' => ['required', 'integer:strict', 'min:1', 'max:100000000'],
+        ])->validate();
+        $payload['uid'] = strtolower($payload['uid']);
+
+        $this->gameService->purchaseInsurance(
+            $payload['game_uuid'],
+            $payload,
+            $message->timestamp,
+            $message->connection->user->id,
+            $message->connection->clientId,
+        );
+        $this->ack($message->connection, $message->type, $message->id);
+    }
+
     public function handleShow(GameServerMessageVo $message): void
     {
         $payload = $this->validatorFactory->make($message->payload, [
@@ -495,6 +520,7 @@ final class GameServer implements OnCloseInterface, OnMessageInterface, OnOpenIn
     {
         $payload = $this->validatorFactory->make($message->payload, [
             'game_uuid' => ['required', 'uuid'],
+            'insurance_payout' => ['sometimes', 'integer:strict', 'min:0', 'max:1000000000000'],
             'winners' => ['required', 'array', 'list', 'min:1'],
             'winners.*' => ['required', 'array'],
             'winners.*.uid' => ['required', 'string', 'regex:/\A[A-Za-z0-9]{1,16}\z/', 'distinct:ignore_case'],

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Game;
 
+use App\Enum\GameEventTypeEnum;
 use App\Game\GameProviderManager;
 use App\Game\GameServer;
 use App\Game\Providers\BaseProvider;
@@ -36,6 +37,67 @@ use Throwable;
 
 final class GameServerTest extends DatabaseTestCase
 {
+    public function test_insurance_purchase_and_over_payout_share_the_game_state(): void
+    {
+        $game = GameVoFixture::headsUp();
+        $game->event(GameEventTypeEnum::STAGE, ['stage' => 'FLOP', 'cards' => ['As', 'Kh', 'Qd']], time() * 1000);
+        $redis = new class(serialize($game)) extends Redis
+        {
+            public function __construct(public string $game) {}
+
+            /** @param array<int, mixed> $arguments */
+            public function __call(string $name, array $arguments): mixed
+            {
+                if ($name === 'get') {
+                    return $this->game;
+                }
+                if ($name === 'eval' && $arguments[1][1] === $this->game) {
+                    $this->game = $arguments[1][2];
+
+                    return 1;
+                }
+                throw new RuntimeException('Unexpected Redis command: '.$name);
+            }
+        };
+        $sender = new class extends Sender
+        {
+            /** @var list<array<string, mixed>> */
+            public array $messages = [];
+
+            public function __construct() {}
+
+            /** @param array<int, mixed> $arguments */
+            public function __call(string $name, array $arguments): bool
+            {
+                $this->messages[] = json_decode($arguments[1], true, 512, JSON_THROW_ON_ERROR);
+
+                return true;
+            }
+        };
+        $container = ApplicationContext::getContainer();
+        $service = new GameService(new GameProviderManager, $redis, $container->get(DriverFactory::class), $container->get(LoggerInterface::class));
+        $user = new User;
+        $user->id = 1;
+        $connection = new GameServerConnectionVo(11, $user, 'client-a');
+        $server = $this->gameServerWithConnections(new class extends BaseProvider
+        {
+            public function requestAction(GameVo $game, Closure $callback): void {}
+        }, [11 => $connection], $sender, $service);
+        $server->handleInsurancePurchased(new GameServerMessageVo($connection, 'buy-1', 'INSURANCE_PURCHASED', [
+            'game_uuid' => $game->uuid, 'uid' => 'hero', 'stage' => 'FLOP',
+            'pot_id' => 1, 'odds' => '2.50', 'amount' => 40,
+        ], time() * 1000));
+        $server->handleOver(new GameServerMessageVo($connection, 'over-1', 'OVER', [
+            'game_uuid' => $game->uuid, 'winners' => [['uid' => 'villain', 'amount' => 0]], 'insurance_payout' => 100,
+        ], time() * 1000));
+
+        self::assertSame(['INSURANCE_PURCHASED.ACK', 'OVER.ACK'], array_column($sender->messages, 'type'));
+        $saved = unserialize($redis->game);
+        self::assertSame(40, $saved->insuranceAmount());
+        self::assertSame(100, $saved->insurancePayout());
+        self::assertCount(3, $saved->events);
+    }
+
     public function test_ok_start_does_not_infer_blinds_from_empty_button_seat(): void
     {
         $provider = new class extends BaseProvider

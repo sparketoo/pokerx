@@ -144,6 +144,22 @@ class GameVo extends Vo
         return $this->players->sum(fn (GamePlayerVo $playerVo) => $playerVo->total());
     }
 
+    public function insuranceAmount(): int
+    {
+        return $this->events->sum(fn (GameEventVo $event): int => $event->type->isInsurancePurchased() ? $event->payload['amount'] : 0);
+    }
+
+    public function insurancePayout(): int
+    {
+        foreach ($this->events as $event) {
+            if ($event->type->isOver()) {
+                return $event->payload['insurance_payout'] ?? 0;
+            }
+        }
+
+        return 0;
+    }
+
     /**
      * @param  array<string, mixed>  $payload
      */
@@ -152,6 +168,10 @@ class GameVo extends Vo
         array $payload,
         int $timestamp,
     ): GameEventVo {
+
+        if ($type->isInsurancePurchased()) {
+            return $this->purchaseInsurance($payload, $timestamp);
+        }
 
         if (! $this->status->isOpen()) {
             throw new BusinessException(__('messages.common.status_invalid'), ErrorCode::BUSINESS_ERROR);
@@ -189,6 +209,12 @@ class GameVo extends Vo
             $player->blind += $amount;
         }
         if ($type->isOver()) {
+            if (array_key_exists('insurance_payout', $payload)
+                && (! is_int($payload['insurance_payout']) || $payload['insurance_payout'] < 0
+                    || $payload['insurance_payout'] > 1000000000000
+                    || ($payload['insurance_payout'] > 0 && $this->insuranceAmount() === 0))) {
+                throw new GameException(__('messages.game.event_invalid'), ErrorCode::EVENT_INVALID);
+            }
             $seen = [];
             foreach ($payload['returns'] ?? [] as &$return) {
                 $returnPlayer = $this->playerOrFail($return['uid']);
@@ -257,6 +283,50 @@ class GameVo extends Vo
             // 牌局终止
             $this->status = GameStatusEnum::ABORT;
         }
+
+        return $event;
+    }
+
+    /** @param array<string, mixed> $payload */
+    private function purchaseInsurance(array $payload, int $timestamp): GameEventVo
+    {
+        if (! $this->status->isOpen()) {
+            throw new BusinessException(__('messages.common.status_invalid'), ErrorCode::BUSINESS_ERROR);
+        }
+        $player = $this->player(is_string($payload['uid'] ?? null) ? $payload['uid'] : '');
+        if ($player !== $this->hero() || ! is_int($payload['pot_id'] ?? null)
+            || $payload['pot_id'] < 0 || ! is_int($payload['amount'] ?? null)
+            || $payload['amount'] <= 0 || ! is_string($payload['odds'] ?? null)
+            || ! preg_match('/\A[1-9][0-9]{0,9}(?:\.[0-9]{1,2})?\z/D', $payload['odds'])) {
+            throw new GameException(__('messages.game.event_invalid'), ErrorCode::EVENT_INVALID);
+        }
+        $payload['uid'] = $player->uid;
+        $stage = StageEnum::fromName($payload['stage'] ?? '');
+        if (! in_array($stage, [StageEnum::FLOP, StageEnum::TURN], true)) {
+            throw new GameException(__('messages.game.event_invalid'), ErrorCode::EVENT_INVALID);
+        }
+
+        // 重试可使用新的消息 ID/时间戳；业务键与内容相同才复用原事件。
+        foreach ($this->events as $existing) {
+            if (! $existing->type->isInsurancePurchased()) {
+                continue;
+            }
+            if (($existing->payload['stage'] ?? null) !== $stage->name
+                || ($existing->payload['pot_id'] ?? null) !== $payload['pot_id']) {
+                continue;
+            }
+            if ($existing->payload == $payload) {
+                return $existing;
+            }
+            throw new GameException(__('messages.game.event_invalid'), ErrorCode::EVENT_INVALID);
+        }
+
+        if ($this->stage !== $stage) {
+            throw new GameException(__('messages.game.event_invalid'), ErrorCode::EVENT_INVALID);
+        }
+
+        $event = new GameEventVo($this, GameEventTypeEnum::INSURANCE_PURCHASED, $payload, $timestamp, $player);
+        $this->events->push($event);
 
         return $event;
     }
