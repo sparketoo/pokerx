@@ -546,15 +546,6 @@ final class ProtoHttpProvider extends BaseProvider
 
                 continue;
             }
-            if ($event->type->isShow()) {
-                $events[] = [
-                    'eventType' => 'knownPlayerCards',
-                    'name' => $event->payload['uid'],
-                    'cards' => CardVo::cardsToShort($event->payload['cards']),
-                ];
-
-                continue;
-            }
         }
 
         if ($over) {
