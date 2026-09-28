@@ -26,7 +26,9 @@ return new class extends Migration
             $table->unsignedBigInteger('pot')->comment('底池：主池+边池');
             $table->unsignedBigInteger('total')->comment('本人总下注金额：包含前注+盲注+主动下注');
             $table->unsignedBigInteger('winnings')->default(0)->comment('本人赢得奖金');
-            $table->bigInteger('profit')->comment('本人游戏收益：winnings-total');
+            $table->unsignedBigInteger('insurance_amount')->default(0)->comment('本人保险购买总金额');
+            $table->unsignedBigInteger('insurance_payout')->default(0)->comment('本人保险实际赔付总金额');
+            $table->bigInteger('profit')->comment('本人游戏收益：winnings-total-insurance_amount+insurance_payout');
             $table->timestamps(6);
 
             $table->index(['user_id', 'created_at', 'id']);
