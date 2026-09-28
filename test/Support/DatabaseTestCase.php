@@ -71,6 +71,7 @@ abstract class DatabaseTestCase extends TestCase
             user_id BIGINT UNSIGNED NOT NULL,
             network ENUM('OK','WE','WPK' ,'YW') NOT NULL,
             game_key VARCHAR(32) COLLATE utf8mb4_bin NOT NULL,
+            hero_uid VARCHAR(64) COLLATE utf8mb4_bin NOT NULL,
             provider VARCHAR(32) NOT NULL,
             players TINYINT UNSIGNED NOT NULL,
             status ENUM('OPEN','ABORT','CLOSED','OVER') NOT NULL,
@@ -85,7 +86,7 @@ abstract class DatabaseTestCase extends TestCase
             profit BIGINT NOT NULL,
             created_at TIMESTAMP(6) NULL,
             updated_at TIMESTAMP(6) NULL,
-            UNIQUE KEY games_user_network_game_key_unique (user_id, network, game_key)
+            UNIQUE KEY games_user_network_game_key_hero_uid_unique (user_id, network, game_key, hero_uid)
         )");
         Db::statement('CREATE TEMPORARY TABLE game_players (
             id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
@@ -206,6 +207,7 @@ abstract class DatabaseTestCase extends TestCase
             'user_id' => $user->id,
             'network' => 'WE',
             'game_key' => str_replace('-', '', $uuid),
+            'hero_uid' => 'hero',
             'provider' => 'mock',
             'players' => 2,
             'status' => $status,

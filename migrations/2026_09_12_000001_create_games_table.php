@@ -16,6 +16,7 @@ return new class extends Migration
             $table->unsignedBigInteger('user_id')->comment('用户ID');
             $table->enum('network', NetworkEnum::names())->comment('扑克网络');
             $table->string('game_key', 32)->collation('utf8mb4_bin')->comment('平台牌局标识');
+            $table->string('hero_uid', 64)->nullable()->comment('本人UID');
             $table->string('provider', 32)->comment('服务商');
             $table->unsignedTinyInteger('players')->comment('玩家数量');
             $table->enum('status', GameStatusEnum::names())->default(GameStatusEnum::OPEN->name)->comment('游戏状态');
@@ -31,10 +32,10 @@ return new class extends Migration
             $table->bigInteger('profit')->comment('本人游戏收益：winnings-total-insurance_amount+insurance_payout');
             $table->timestamps(6);
 
+            $table->unique(['user_id', 'network', 'game_key', 'hero_uid']);
             $table->index(['user_id', 'created_at', 'id']);
             $table->index(['user_id', 'status']);
             $table->index(['user_id', 'profit']);
-            $table->unique(['user_id', 'network', 'game_key']);
         });
     }
 

@@ -12,8 +12,10 @@ declare(strict_types=1);
  *
  * @license  https://github.com/hyperf/hyperf/blob/master/LICENSE
  */
+use App\Listener\SharedShowPipeMessageListener;
 use Hyperf\ExceptionHandler\Listener\ErrorExceptionHandler;
 
 return [
     ErrorExceptionHandler::class,
+    SharedShowPipeMessageListener::class,
 ];

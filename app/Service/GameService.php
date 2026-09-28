@@ -22,6 +22,7 @@ use Hyperf\Coroutine\Coroutine;
 use Hyperf\DbConnection\Db;
 use Hyperf\Redis\Redis;
 use Hyperf\Stringable\Str;
+use JsonException;
 use Psr\Log\LoggerInterface;
 use Throwable;
 
@@ -78,12 +79,13 @@ LUA;
             $buttonSeatNumber,
             $clientId,
         );
-        $existsKey = 'game:'.$userId.':'.$network->name.':'.$gameKey;
+        $heroUid = $game->hero()->uid;
+        $existsKey = 'game:'.$userId.':'.$network->name.':'.$gameKey.':'.$heroUid;
         $exists = $this->redis->get($existsKey);
         if (! $exists) {
             $exists = Game::query()->where('user_id', $userId)
                 ->where('network', $network->name)
-                ->where('game_key', $gameKey)->exists();
+                ->where('game_key', $gameKey)->where('hero_uid', $heroUid)->exists();
         }
 
         if ($exists) {
@@ -128,6 +130,55 @@ LUA;
     public function delete(string $uuid): void
     {
         $this->redis->del('game:'.$uuid);
+    }
+
+    public function registerParticipant(GameVo $game, int $fd, int $workerId): void
+    {
+        $hero = $game->hero();
+        $member = [
+            'uuid' => $game->uuid,
+            'fd' => $fd,
+            'worker_id' => $workerId,
+            'client_id' => $game->clientId,
+            'uid' => $hero->uid,
+            'name' => $hero->name,
+            'seat' => $hero->seatNumber,
+            'stack' => $hero->stack,
+        ];
+        $key = $this->participantsKey($game);
+        $this->redis->rPush($key, json_encode($member, JSON_THROW_ON_ERROR));
+        $this->redis->expire($key, 3600);
+    }
+
+    /** @return list<array{uuid:string,fd:int,worker_id:int,client_id:string,uid:string,name:string,seat:int,stack:int}> */
+    public function participants(GameVo $game): array
+    {
+        $members = [];
+        $values = $this->redis->lRange($this->participantsKey($game), 0, -1);
+        if (! is_array($values)) {
+            return [];
+        }
+        foreach ($values as $value) {
+            try {
+                $member = json_decode($value, true, 16, JSON_THROW_ON_ERROR);
+            } catch (JsonException) {
+                continue;
+            }
+            if (is_array($member) && is_string($member['uuid'] ?? null)
+                && is_int($member['fd'] ?? null) && is_int($member['worker_id'] ?? null)
+                && is_string($member['client_id'] ?? null) && is_string($member['uid'] ?? null)
+                && is_string($member['name'] ?? null) && is_int($member['seat'] ?? null)
+                && is_int($member['stack'] ?? null)) {
+                $members[] = $member;
+            }
+        }
+
+        return $members;
+    }
+
+    private function participantsKey(GameVo $game): string
+    {
+        return 'game:participants:'.$game->network->name.':'.$game->gameKey;
     }
 
     /**
@@ -208,6 +259,7 @@ LUA;
                 'user_id' => $game->userId,
                 'network' => $game->network->name,
                 'game_key' => $game->gameKey,
+                'hero_uid' => $hero->uid,
                 'provider' => $this->pokerManager->getDefaultProvider(),
                 'players' => $game->players->count(),
                 'status' => $game->status->name,

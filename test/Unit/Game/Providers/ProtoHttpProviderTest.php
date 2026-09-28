@@ -769,6 +769,21 @@ final class ProtoHttpProviderTest extends TestCase
         self::assertSame('stageStarted', $events[9]['eventType']);
     }
 
+    public function test_show_is_sent_as_known_player_cards(): void
+    {
+        $game = new GameVo(1, '12345678-90ab-4cde-8f01-23456789abd0', NetworkEnum::OK, 'room#130', 2, 1, 0, [
+            ['uid' => 'hero', 'seat' => 1, 'stack' => 100, 'hero' => true],
+            ['uid' => 'friend', 'seat' => 2, 'stack' => 100, 'hero' => false],
+        ], 1, 'client-a');
+        $game->event(GameEventTypeEnum::SHOW, ['uid' => 'friend', 'cards' => ['As', 'Kd']], 1);
+
+        $events = (new ProtoHttpProvider(['url' => 'https://proto.example']))->gameEvents($game)['events'];
+
+        self::assertContains([
+            'eventType' => 'knownPlayerCards', 'name' => 'friend', 'cards' => 'As,Kd',
+        ], $events);
+    }
+
     public function test_ok_heads_up_posts_both_calculated_blinds(): void
     {
         $game = new GameVo(1, '12345678-90ab-4cde-8f01-23456789abcf', NetworkEnum::OK, '6724521#45', 2, 1, 0, [

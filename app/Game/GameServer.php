@@ -16,9 +16,11 @@ use App\Game\Providers\ProviderInterface;
 use App\Model\User;
 use App\Service\GameService;
 use App\Service\InsuranceService;
+use App\Service\UserGameConfigService;
 use App\Service\UserTokenService;
 use App\Vo\Game\GameServerConnectionVo;
 use App\Vo\Game\GameServerMessageVo;
+use App\Vo\Game\GameVo;
 use App\Vo\Game\RequestActionResultVo;
 use Hyperf\Contract\OnCloseInterface;
 use Hyperf\Contract\OnMessageInterface;
@@ -53,6 +55,8 @@ final class GameServer implements OnCloseInterface, OnMessageInterface, OnOpenIn
      */
     private array $connections = [];
 
+    private mixed $socketServer = null;
+
     public function __construct(
         private readonly Sender $sender,
         private readonly GameProviderManager $poker,
@@ -62,11 +66,13 @@ final class GameServer implements OnCloseInterface, OnMessageInterface, OnOpenIn
         private readonly ValidatorFactoryInterface $validatorFactory,
         private readonly LoggerInterface $logger,
         private readonly Encrypter $encrypter,
+        private readonly UserGameConfigService $userGameConfigService,
     ) {}
 
     /** @param  mixed  $server */
     public function onOpen($server, $request): void
     {
+        $this->socketServer = $server;
         $disconnect = true;
         $connection = null;
         try {
@@ -137,6 +143,7 @@ final class GameServer implements OnCloseInterface, OnMessageInterface, OnOpenIn
     /** @param  mixed  $server */
     public function onMessage($server, $frame): void
     {
+        $this->socketServer = $server;
         $fd = $frame->fd;
         $id = null;
         $connection = null;
@@ -291,6 +298,9 @@ final class GameServer implements OnCloseInterface, OnMessageInterface, OnOpenIn
                 throw new RuntimeException('WebSocket connection closed during game creation');
             }
             $this->provider()->start($game);
+            if ($this->socketServer !== null && is_int($this->socketServer->worker_id ?? null)) {
+                $this->gameService->registerParticipant($game, $message->connection->fd, $this->socketServer->worker_id);
+            }
         } catch (Throwable $error) {
             $this->gameService->delete($game->uuid);
 
@@ -346,6 +356,80 @@ final class GameServer implements OnCloseInterface, OnMessageInterface, OnOpenIn
 
         $this->provider()->dealt($event);
         $this->ack($message->connection, $message->type, $message->id);
+        if ($this->socketServer === null) {
+            return;
+        }
+        try {
+            if (($this->userGameConfigService->all($event->game->userId, $event->game->network)['share_hole_cards'] ?? null) === '1') {
+                $this->relaySharedShow($event->game, $payload['cards']);
+            }
+        } catch (Throwable $error) {
+            $this->logger->warning('Shared cards relay failed', ['game_uuid' => $event->game->uuid, 'exception' => $error]);
+        }
+    }
+
+    /** @param list<string> $cards */
+    private function relaySharedShow(GameVo $game, array $cards): void
+    {
+        if ($this->socketServer === null) {
+            return;
+        }
+        $hero = $game->hero();
+        foreach ($this->gameService->participants($game) as $member) {
+            if ($member['uuid'] === $game->uuid || $member['uid'] === $hero->uid) {
+                continue;
+            }
+            $message = [
+                'kind' => 'shared_show',
+                'target_uuid' => $member['uuid'],
+                'fd' => $member['fd'],
+                'client_id' => $member['client_id'],
+                'network' => $game->network->name,
+                'game_key' => $game->gameKey,
+                'uid' => $hero->uid,
+                'name' => $hero->name,
+                'cards' => $cards,
+            ];
+            if ($member['worker_id'] === $this->socketServer->worker_id) {
+                $this->deliverSharedShow($message);
+            } else {
+                $this->socketServer->sendMessage(json_encode($message, JSON_THROW_ON_ERROR), $member['worker_id']);
+            }
+        }
+    }
+
+    /** @param array<string, mixed> $message */
+    public function deliverSharedShow(array $message): void
+    {
+        $fd = $message['fd'] ?? null;
+        if (! is_string($message['target_uuid'] ?? null) || ! is_string($message['uid'] ?? null)
+            || ! is_string($message['name'] ?? null) || ! is_array($message['cards'] ?? null)
+            || count($message['cards']) !== 2 || ! is_string($message['cards'][0] ?? null)
+            || ! is_string($message['cards'][1] ?? null)) {
+            return;
+        }
+        $connection = is_int($fd) ? ($this->connections[$fd] ?? null) : null;
+        if ($connection === null || ! $connection->ready || $connection->clientId !== ($message['client_id'] ?? null)) {
+            return;
+        }
+        try {
+            $game = $this->gameService->findForClient($message['target_uuid'], $connection->user->id, $connection->clientId);
+        } catch (GameException) {
+            return;
+        }
+        if (! $game->status->isOpen() || $game->network->name !== ($message['network'] ?? null)
+            || $game->gameKey !== ($message['game_key'] ?? null)
+            || $game->hero()->uid === $message['uid']
+            || $game->player($message['uid']) === null) {
+            return;
+        }
+        $this->reply($fd, 'SHOW', [
+            'network' => $game->network->name,
+            'game_key' => $game->gameKey,
+            'uid' => $message['uid'],
+            'name' => $message['name'],
+            'cards' => $message['cards'],
+        ]);
     }
 
     public function handleStage(GameServerMessageVo $message): void
@@ -630,6 +714,9 @@ final class GameServer implements OnCloseInterface, OnMessageInterface, OnOpenIn
         $sent = $this->sender->push($fd, json_encode($message, JSON_THROW_ON_ERROR));
         if (isset($message['payload']['client_id'])) {
             $message['payload']['client_id'] = '[redacted]';
+        }
+        if ($type === 'SHOW' && isset($message['payload']['cards'])) {
+            $message['payload']['cards'] = '[redacted]';
         }
         $this->logger->debug('Poker Server Send', ['fd' => $fd, 'sent' => $sent, 'message' => $message]);
 

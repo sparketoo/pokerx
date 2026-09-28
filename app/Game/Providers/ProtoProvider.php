@@ -71,7 +71,9 @@ final class ProtoProvider extends BaseProvider
 
     public function requestAction(GameVo $game, Closure $callback): void
     {
-        $response = $this->client($game)->request($game->uuid, $this->messages->gameEvents($game), [
+        $events = $this->messages->gameEvents($game);
+        $this->logger()->debug('Proto Send Message', $events);
+        $response = $this->client($game)->request($game->uuid, $events, [
             'structType' => 'getAnswer',
             'gameId' => $game->uuid,
             'potForAlpha' => $game->pot(),

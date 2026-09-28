@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Feature\Game;
 
 use App\Enum\GameEventTypeEnum;
+use App\Enum\NetworkEnum;
 use App\Game\GameProviderManager;
 use App\Game\GameServer;
 use App\Game\Providers\BaseProvider;
@@ -12,6 +13,7 @@ use App\Game\Providers\ProviderInterface;
 use App\Model\User;
 use App\Service\GameService;
 use App\Service\InsuranceService;
+use App\Service\UserGameConfigService;
 use App\Service\UserTokenService;
 use App\Vo\Game\GameEventVo;
 use App\Vo\Game\GameServerConnectionVo;
@@ -19,6 +21,7 @@ use App\Vo\Game\GameServerMessageVo;
 use App\Vo\Game\GameVo;
 use Closure;
 use Hyperf\AsyncQueue\Driver\DriverFactory;
+use Hyperf\Cache\Cache;
 use Hyperf\Context\ApplicationContext;
 use Hyperf\Database\ConnectionResolverInterface;
 use Hyperf\Di\Container;
@@ -32,12 +35,137 @@ use ReflectionProperty;
 use RuntimeException;
 use Swoole\Http\Request as SwooleRequest;
 use Swoole\WebSocket\Frame;
+use Tests\Fixtures\FakeGameServerSender;
 use Tests\Fixtures\GameVoFixture;
 use Tests\Support\DatabaseTestCase;
 use Throwable;
 
 final class GameServerTest extends DatabaseTestCase
 {
+    public function test_only_enabled_source_relays_its_named_cards_to_another_worker(): void
+    {
+        $game = new GameVo(1, '11111111-1111-4111-8111-000000000001', NetworkEnum::WE, 'room-1#1', 100, 50, 10, [
+            ['uid' => 'hero', 'name' => 'Alice', 'seat' => 1, 'stack' => 1000, 'hero' => true],
+            ['uid' => 'villain', 'name' => 'Bob', 'seat' => 2, 'stack' => 1000, 'hero' => false],
+        ], 1, 'client-a');
+        $redis = new class(serialize($game)) extends Redis
+        {
+            public function __construct(public string $game) {}
+
+            /** @param array<int, mixed> $arguments */
+            public function __call(string $name, array $arguments): mixed
+            {
+                if ($name === 'get') {
+                    return $this->game;
+                }
+                if ($name === 'eval') {
+                    $this->game = $arguments[1][2];
+
+                    return 1;
+                }
+                if ($name === 'lRange') {
+                    return [json_encode([
+                        'uuid' => '22222222-2222-4222-8222-000000000002', 'fd' => 22,
+                        'worker_id' => 1, 'client_id' => 'client-b', 'uid' => 'villain',
+                        'name' => 'Bob', 'seat' => 2, 'stack' => 1000,
+                    ], JSON_THROW_ON_ERROR)];
+                }
+                throw new RuntimeException($name);
+            }
+        };
+        $cache = new class extends Cache
+        {
+            public bool $enabled = true;
+
+            public function __construct() {}
+
+            public function get($key, $default = null): mixed
+            {
+                return ['share_hole_cards' => $this->enabled ? '1' : '0'];
+            }
+        };
+        $container = ApplicationContext::getContainer();
+        $service = new GameService(new GameProviderManager, $redis, $container->get(DriverFactory::class), $container->get(LoggerInterface::class));
+        $user = new User;
+        $user->id = 1;
+        $connection = new GameServerConnectionVo(11, $user, 'client-a');
+        $connection->ready = true;
+        $sender = new FakeGameServerSender;
+        $server = $this->gameServerWithConnections(new class extends BaseProvider
+        {
+            public function requestAction(GameVo $game, Closure $callback): void {}
+        }, [11 => $connection], $sender, $service, new UserGameConfigService($cache));
+        $socketServer = new class
+        {
+            public int $worker_id = 0;
+
+            /** @var list<array<string, mixed>> */
+            public array $sent = [];
+
+            public function sendMessage(string $message, int $workerId): void
+            {
+                $this->sent[] = ['worker_id' => $workerId, 'message' => json_decode($message, true, 512, JSON_THROW_ON_ERROR)];
+            }
+        };
+        (new ReflectionProperty(GameServer::class, 'socketServer'))->setValue($server, $socketServer);
+
+        $server->handleDealt(new GameServerMessageVo($connection, 'dealt-1', 'DEALT', [
+            'game_uuid' => $game->uuid, 'cards' => ['As', 'Kd'],
+        ], time() * 1000));
+
+        self::assertSame('DEALT.ACK', $sender->messages[0]['type']);
+        self::assertSame(1, $socketServer->sent[0]['worker_id']);
+        self::assertSame(['uid' => 'hero', 'name' => 'Alice', 'cards' => ['As', 'Kd']], array_intersect_key(
+            $socketServer->sent[0]['message'], array_flip(['uid', 'name', 'cards']),
+        ));
+
+        $cache->enabled = false;
+        $redis->game = serialize($game);
+        $socketServer->sent = [];
+        $server->handleDealt(new GameServerMessageVo($connection, 'dealt-2', 'DEALT', [
+            'game_uuid' => $game->uuid, 'cards' => ['As', 'Kd'],
+        ], time() * 1000));
+        self::assertSame([], $socketServer->sent);
+    }
+
+    public function test_shared_show_reaches_only_the_registered_client_without_a_game_uuid(): void
+    {
+        $game = GameVoFixture::headsUp();
+        $redis = new class(serialize($game)) extends Redis
+        {
+            public function __construct(private string $game) {}
+
+            /** @param array<int, mixed> $arguments */
+            public function __call(string $name, array $arguments): mixed
+            {
+                return $name === 'get' ? $this->game : throw new RuntimeException($name);
+            }
+        };
+        $sender = new FakeGameServerSender;
+        $container = ApplicationContext::getContainer();
+        $service = new GameService(new GameProviderManager, $redis, $container->get(DriverFactory::class), $container->get(LoggerInterface::class));
+        $user = new User;
+        $user->id = 1;
+        $connection = new GameServerConnectionVo(11, $user, 'client-a');
+        $connection->ready = true;
+        $server = $this->gameServerWithConnections(new class extends BaseProvider
+        {
+            public function requestAction(GameVo $game, Closure $callback): void {}
+        }, [11 => $connection], $sender, $service);
+        $message = [
+            'target_uuid' => $game->uuid, 'fd' => 11, 'client_id' => 'client-a',
+            'network' => 'WE', 'game_key' => 'room-1#1', 'uid' => 'villain',
+            'name' => 'Bob', 'cards' => ['As', 'Kd'],
+        ];
+
+        $server->deliverSharedShow($message);
+        self::assertSame(['network' => 'WE', 'game_key' => 'room-1#1', 'uid' => 'villain', 'name' => 'Bob', 'cards' => ['As', 'Kd']], $sender->messages[0]['payload']);
+        self::assertSame('SHOW', $sender->messages[0]['type']);
+
+        $server->deliverSharedShow([...$message, 'client_id' => 'stale-client']);
+        self::assertCount(1, $sender->messages);
+    }
+
     public function test_insurance_purchase_and_over_payout_share_the_game_state(): void
     {
         $game = GameVoFixture::headsUp();
@@ -535,6 +663,7 @@ final class GameServerTest extends DatabaseTestCase
         array $connections,
         ?Sender $sender = null,
         ?GameService $gameService = null,
+        ?UserGameConfigService $configs = null,
     ): GameServer {
         $container = ApplicationContext::getContainer();
         $manager = new GameProviderManager;
@@ -548,6 +677,7 @@ final class GameServerTest extends DatabaseTestCase
             $container->get(ValidatorFactoryInterface::class),
             $container->get(LoggerInterface::class),
             $container->get(Encrypter::class),
+            $configs ?? $container->get(UserGameConfigService::class),
         );
         (new ReflectionProperty(GameServer::class, 'connections'))->setValue($server, $connections);
 

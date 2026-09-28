@@ -16,6 +16,15 @@ use Tests\TestCase;
 
 final class GameVoTest extends TestCase
 {
+    public function test_a_game_requires_exactly_one_hero(): void
+    {
+        $this->expectException(GameException::class);
+        new GameVo(1, '11111111-1111-4111-8111-000000000001', NetworkEnum::OK, 'table#1', 2, 1, 0, [
+            ['uid' => 'alice', 'seat' => 1, 'stack' => 100, 'hero' => true],
+            ['uid' => 'bob', 'seat' => 2, 'stack' => 100, 'hero' => true],
+        ], 1, 'client-a');
+    }
+
     public function test_insurance_purchases_deduplicate_by_stage_and_pot_id(): void
     {
         $game = GameVoFixture::headsUp();

@@ -13,9 +13,9 @@ class SaveRequest extends IndexRequest
     public function rules(): array
     {
         return parent::rules() + [
-            'items' => ['required', 'array', 'list', 'min:1', 'max:19'],
+            'items' => ['required', 'array', 'list', 'min:1', 'max:20'],
             'items.*' => ['required', 'array:key,value'],
-            'items.*.key' => ['required', 'string', 'regex:/^(?:insurance_(?:outs_[1-8]|default)|auto_bet_(?:fold|check|call|bet|raise|all_in|insurance|check_fold|bet_raise|call_all_in))$/D', 'distinct:strict'],
+            'items.*.key' => ['required', 'string', 'regex:/^(?:insurance_(?:outs_[1-8]|default)|auto_bet_(?:fold|check|call|bet|raise|all_in|insurance|check_fold|bet_raise|call_all_in)|share_hole_cards)$/D', 'distinct:strict'],
             'items.*.value' => ['present', 'nullable', 'string'],
         ];
     }
@@ -37,7 +37,8 @@ class SaveRequest extends IndexRequest
                 continue;
             }
             $isDelay = is_string($item['key'] ?? null) && str_starts_with($item['key'], 'auto_bet_');
-            $allowed = $isDelay ? $delayRanges : InsuranceService::RATIOS;
+            $allowed = ($item['key'] ?? null) === 'share_hole_cards'
+                ? ['1'] : ($isDelay ? $delayRanges : InsuranceService::RATIOS);
             $validator->addRules(["items.{$index}.value" => ['required', 'in:'.implode(',', $allowed)]]);
         }
     }

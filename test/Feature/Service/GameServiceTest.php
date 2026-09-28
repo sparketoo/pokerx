@@ -5,9 +5,12 @@ declare(strict_types=1);
 namespace Tests\Feature\Service;
 
 use App\Enum\GameEventTypeEnum;
+use App\Enum\NetworkEnum;
 use App\Game\GameProviderManager;
+use App\Model\Game;
 use App\Model\GameEvent;
 use App\Service\GameService;
+use App\Vo\Game\GameVo;
 use Hyperf\AsyncQueue\Driver\DriverFactory;
 use Hyperf\Context\ApplicationContext;
 use Hyperf\Redis\Redis;
@@ -17,6 +20,26 @@ use Tests\Support\DatabaseTestCase;
 
 final class GameServiceTest extends DatabaseTestCase
 {
+    public function test_same_user_can_store_one_game_per_hero_in_a_shared_hand(): void
+    {
+        $container = ApplicationContext::getContainer();
+        $service = new GameService(
+            new GameProviderManager,
+            $container->get(Redis::class),
+            $container->get(DriverFactory::class),
+            $container->get(LoggerInterface::class),
+        );
+        foreach (['alice', 'bob'] as $index => $heroUid) {
+            $game = new GameVo(1, sprintf('11111111-1111-4111-8111-%012d', $index + 1), NetworkEnum::OK, 'table#1', 2, 1, 0, [
+                ['uid' => 'alice', 'seat' => 1, 'stack' => 100, 'hero' => $heroUid === 'alice'],
+                ['uid' => 'bob', 'seat' => 2, 'stack' => 100, 'hero' => $heroUid === 'bob'],
+            ], 1, 'client-'.$index);
+            $service->store($game);
+        }
+
+        self::assertSame(2, Game::query()->where('user_id', 1)->where('network', 'OK')->where('game_key', 'table#1')->count());
+    }
+
     public function test_store_persists_insurance_events_and_profit(): void
     {
         $container = ApplicationContext::getContainer();

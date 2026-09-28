@@ -218,7 +218,7 @@ HTTP 的通用错误码包括 `auth_failed`、`auth_required`、`two_factor_requ
 
 ### 2.8 游戏配置
 
-两个接口都需要登录令牌，并按当前用户及 `network` 独立保存配置。这里的 HTTP `network` 接受大写值 `OK`、`WE`、`WPK`、`YW`；
+两个接口都需要登录令牌，并按当前用户及 `network` 独立保存配置。这里的 HTTP `network` 接受大写值 `OK`、`WE`、`WPK`、`WPK_CLUB`、`YW`。
 
 `GET /api/mine/game_config?network=OK` 返回该网络下的全部配置，按 `key` 升序排列；无配置时 `items` 为空数组。成功响应示例：
 
@@ -240,16 +240,18 @@ HTTP 的通用错误码包括 `auth_failed`、`auth_required`、`two_factor_requ
 
 | 字段 | 约束及含义 |
 | --- | --- |
-| `network` | 必填；`OK`、`WE`、`WPK` 或 `YW` |
-| `items` | 必填；1–19 项，不能重复 `key`；只修改提交的配置项 |
-| `items[].key` | `insurance_default`、`insurance_outs_1` 至 `insurance_outs_8`，或 `auto_bet_fold`、`auto_bet_check`、`auto_bet_call`、`auto_bet_bet`、`auto_bet_raise`、`auto_bet_all_in`、`auto_bet_insurance`；旧的三个分组键仍可读取和保存 |
-| `items[].value` | 保险键接受 `MIN`、`MAX`、`1`、`1/2`、`1/3`、`1/5`、`1/8`；自动下注键接受 0–10 秒的 `min-max` 字符串；`null` 删除对应配置。 |
+| `network` | 必填；`OK`、`WE`、`WPK`、`WPK_CLUB` 或 `YW` |
+| `items` | 必填；1–20 项，不能重复 `key`；只修改提交的配置项 |
+| `items[].key` | `insurance_default`、`insurance_outs_1` 至 `insurance_outs_8`，`auto_bet_fold`、`auto_bet_check`、`auto_bet_call`、`auto_bet_bet`、`auto_bet_raise`、`auto_bet_all_in`、`auto_bet_insurance`，或 `share_hole_cards`；旧的三个自动执行分组键仍可读取和保存 |
+| `items[].value` | 保险键接受 `MIN`、`MAX`、`1`、`1/2`、`1/3`、`1/5`、`1/8`；自动下注键接受 0–10 秒的 `min-max` 字符串；`share_hole_cards` 仅接受字符串 `"1"`；`null` 删除对应配置。 |
 
 自动执行延迟分别对应弃牌、过牌、跟注、下注、加注、全下和保险，每项可单独设置。值为 `min-max` 秒，例如 `0-10`；两端均为 0–10 的整数，且 `min <= max`。未配置时客户端使用 2–3 秒。读取旧分组配置时，客户端将对应范围分别用于该组内的行动；同一行动的新键优先。
 
 比例档按 `floor(pot × 比例 ÷ odds)` 计算原始投保额，然后限制在服务端报价的 `min` 与 `max` 内；`1` 使用报价中的 `breakeven`，`MAX` 使用 `max`，`MIN` 使用 `min`，即使 `min` 为 0 也返回 0。未设置具体 outs 档位时使用 `insurance_default`；两者都未设置时，若报价有效则使用 `min`。有效报价下返回的每个投保额都不低于 `min`。
 
 保存成功后返回该用户、该网络的完整配置列表，格式与 GET 相同。这两个接口只读写用户游戏设置，不写入保险购买记录。
+
+`share_hole_cards` 默认关闭。将它保存为 `"1"` 表示该用户在这个 `network` 下**共享自己的手牌**；发送 `null` 关闭后，GET 结果中不再包含该键。开关只决定自己的 `DEALT` 是否向同局其他客户端共享，不限制自己接收已开启共享的其他玩家手牌。同一用户打开不同客户端、分别操作不同 Hero 时也按各自 Hero 的 UID 区分。
 
 ## 3. GameServer WebSocket 协议
 
@@ -338,19 +340,19 @@ HTTP 的通用错误码包括 `auth_failed`、`auth_required`、`two_factor_requ
 | `payload` 字段 | 类型 | 约束 | 含义 |
 | --- | --- | --- | --- |
 | `game_key` | string | 必填，最长 32 字符，首尾不能有空白字符 | 平台牌局标识；支持手数的平台使用 `roomNumber#handNumber`，其他平台使用平台游戏局 ID |
-| `network` | string | 必填：`OK`、`WPK`、`YW` | 牌局所属的平台或网络 |
+| `network` | string | 必填：`OK`、`WE`、`WPK`、`WPK_CLUB`、`YW` | 牌局所属的平台或网络 |
 | `ante` | integer | 必填，非负整数 | 每名玩家本手需支付的前注金额 |
 | `big_blind` | integer | 必填，至少 1 | 本手大盲注金额 |
 | `small_blind` | integer | 必填，非负整数 | 本手小盲注金额 |
 | `button_seat_number` | integer | 必填，1–10；允许该座位没有参局玩家 | 庄家按钮所在座位号；不会据此推断大小盲 |
-| `players` | array | 必填，至少 2 名玩家，且至少包含一名 Hero | 参与本手牌局的玩家列表 |
+| `players` | array | 必填，至少 2 名玩家，且恰好包含一名 Hero | 参与本手牌局的玩家列表 |
 | `players[].seat` | integer | 必填，1–10，牌局内互不相同 | 玩家在牌桌上的座位号 |
 | `players[].uid` | string | 必填，1–16 位英文字母或数字，牌局内按不区分大小写的规则互不相同；须发送 JSON 字符串，不能发送 JSON 数字 | 玩家标识；后续 `ACTION`、`SHOW`、`OVER` 等事件使用此值引用玩家 |
-| `players[].name` | string | 可选，最长 16 字符；省略时使用 `uid` | 玩家显示名称 |
-| `players[].hero` | boolean | 必填；至少一名玩家为 `true`，客户端应只标记一名 | `true` 表示该玩家是当前用户（Hero），`false` 表示其他玩家 |
+| `players[].name` | string | 可选，最长 32 字符；省略时使用 `uid` | 玩家显示名称 |
+| `players[].hero` | boolean | 必填；恰好一名玩家为 `true` | `true` 表示该玩家是当前用户（Hero），`false` 表示其他玩家 |
 | `players[].stack` | integer | 必填，非负整数；不能传字符串或浮点数 | 玩家本手开始时、支付前注、普通盲注、补盲和自愿盲注之前的初始筹码 |
 
-同一用户的同一 `network` 下，`game_key` 必须唯一，且区分大小写。`START` 时若 Redis 中已有正在进行的牌局，或数据库中已有保存的牌局，返回 `game_already_exists`；重复 `START` 不会创建新的 UUID。成功回复 `payload` 为 `{"game_uuid":"12345678-90ab-4cde-8f01-23456789abcd"}`。后续所有牌局消息都携带这个 UUID。
+同一用户的同一 `network` 下，`game_key` 与 Hero UID 的组合必须唯一，且 `game_key` 区分大小写。不同 Hero 可以在不同客户端分别创建同一手牌局。`START` 时若 Redis 中已有正在进行的相同组合牌局，或数据库中已有保存的牌局，返回 `game_already_exists`；重复 `START` 不会创建新的 UUID。成功回复 `payload` 为 `{"game_uuid":"12345678-90ab-4cde-8f01-23456789abcd"}`。后续客户端上报的牌局消息都携带自己的 UUID。
 
 `START` 只记录庄家座位、盲注级别、前注和玩家，不推断大小盲座位，也不将盲注计入玩家或底池。客户端须按实际支付分别上报 `BLIND_POSTED`；小盲、大盲、补盲和自愿盲注分别使用 `type: SB`、`BB`、`POST`、`STRADDLE`。座位号不会因空位而变化。
 
@@ -369,6 +371,14 @@ UID 不区分大小写；例如 `Aa1001` 与 `aA1001` 指向同一玩家。新�
 | `SHOW` | `{"game_uuid":"12345678-90ab-4cde-8f01-23456789abcd","uid":"bB1002","cards":["Qs","Qh"]}` | 报告已知玩家的两张手牌；`uid` 为牌局中玩家的 1–16 位字母或数字字符串 |
 
 上述 `game_uuid` 均必填，必须是有效的 UUID（36 字符，含连字符）。`cards` 中单张牌为字符串，长度最多 3 字符；常规扑克牌记法为点数 `2`–`9`、`T`、`J`、`Q`、`K`、`A` 加花色 `c`、`d`、`h`、`s`，例如 `As`、`Th`。服务端当前只校验卡牌数组项的长度和类型，客户端仍应发送有效牌码。`FOLD`、`CHECK` 发送 `amount: 0`。`BLIND_POSTED` 上报重复、迟到或超过剩余筹码时返回 `event_invalid`，未知玩家返回 `player_not_found`。`ACTION` 事件记录的是客户端实际观察到的行动；收到行动建议后，客户端还需另发 `ACTION` 上报实际行动。
+
+当某客户端在对应 `network` 下开启 `share_hole_cards` 并上报 `DEALT` 后，服务端按相同 `network + game_key` 查找其他在线牌局。若对方 Hero UID 不同，且其牌局包含共享者 UID，服务端向对方客户端主动推送 `SHOW`：
+
+```json
+{"id":"server-generated-id","type":"SHOW","timestamp":1790136000500,"reply_to":null,"payload":{"network":"OK","game_key":"62712832#23","uid":"aa1001","name":"玩家A","cards":["As","Kh"]}}
+```
+
+推送载荷没有 `game_uuid`；`uid`、`name`、`cards` 属于**开启共享的玩家**。接收端用 `network + game_key` 定位自己当前的牌局，展示昵称和已知手牌，并以自己的 `game_uuid` 向服务端上报常规 `SHOW`（只携带 `game_uuid`、`uid`、`cards`）。服务端收到该上报才在接收方牌局中保存 `SHOW`，随后返回 `SHOW.ACK`；保存的 `SHOW` 在 Proto `gameEvents` 中表示已知玩家手牌。共享者的牌局不会因此自动增加一条 `SHOW`。同机不同 Worker 之间的推送由服务端内部转发；断线、牌局关闭或目标连接已变化时不会推送。
 
 ### 3.4 `REQUEST_ACTION`：获取行动建议
 

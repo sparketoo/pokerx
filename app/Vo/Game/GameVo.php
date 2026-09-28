@@ -87,6 +87,9 @@ class GameVo extends Vo
             throw new GameException(__('messages.game.players_empty'), ErrorCode::BUSINESS_ERROR);
         }
         $this->hero();
+        if ($this->players->filter(fn (GamePlayerVo $player): bool => $player->isHero)->count() !== 1) {
+            throw new GameException(__('messages.game.event_invalid'), ErrorCode::EVENT_INVALID);
+        }
         $this->stage = StageEnum::PREFLOP;
         $this->status = GameStatusEnum::OPEN;
         $this->createdAtMs = (int) (microtime(true) * 1000);

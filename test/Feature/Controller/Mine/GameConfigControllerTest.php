@@ -131,6 +131,33 @@ final class GameConfigControllerTest extends TestCase
         self::assertSame(2, UserGameConfig::query()->where('user_id', 1)->where('network', 'OK')->count());
     }
 
+    public function test_sharing_switch_uses_one_for_enabled_and_null_for_disabled(): void
+    {
+        $this->signIn(1);
+        $controller = $this->controller();
+
+        $enabled = $this->call($controller, 'save', SaveRequest::class, [
+            'network' => 'OK', 'items' => [['key' => 'share_hole_cards', 'value' => '1']],
+        ], 'POST');
+        self::assertSame([['key' => 'share_hole_cards', 'value' => '1']], $enabled['data']['items']);
+
+        $disabled = $this->call($controller, 'save', SaveRequest::class, [
+            'network' => 'OK', 'items' => [['key' => 'share_hole_cards', 'value' => null]],
+        ], 'POST');
+        self::assertSame([], $disabled['data']['items']);
+
+        foreach (['0', 'true', ''] as $value) {
+            try {
+                $this->call($controller, 'save', SaveRequest::class, [
+                    'network' => 'OK', 'items' => [['key' => 'share_hole_cards', 'value' => $value]],
+                ], 'POST');
+                self::fail('Invalid sharing switch value must be rejected');
+            } catch (ValidationException) {
+                self::assertSame(0, UserGameConfig::query()->where('user_id', 1)->where('network', 'OK')->count());
+            }
+        }
+    }
+
     public function test_save_accepts_auto_bet_ranges_and_rejects_invalid_seconds(): void
     {
         $this->signIn(1);
@@ -204,6 +231,7 @@ final class GameConfigControllerTest extends TestCase
         foreach (range(1, 8) as $outs) {
             $items[] = ['key' => 'insurance_outs_'.$outs, 'value' => InsuranceService::RATIO_MIN];
         }
+        $items[] = ['key' => 'share_hole_cards', 'value' => '1'];
 
         $response = $this->call($controller, 'save', SaveRequest::class, [
             'network' => 'OK',
@@ -211,7 +239,7 @@ final class GameConfigControllerTest extends TestCase
         ], 'POST');
 
         self::assertSame(0, $response['code']);
-        self::assertCount(19, $response['data']['items']);
+        self::assertCount(20, $response['data']['items']);
     }
 
     public function test_save_accepts_every_insurance_ratio_constant(): void

@@ -17,6 +17,7 @@ use Hyperf\Database\Model\Relations\HasMany;
  * @property string $uuid 游戏UUID
  * @property int $user_id 用户ID
  * @property string $game_key 平台牌局标识
+ * @property string $hero_uid 本客户端对应的玩家UID
  * @property string $provider 服务商
  * @property int $players 玩家数量
  * @property NetworkEnum $network 扑克网络
