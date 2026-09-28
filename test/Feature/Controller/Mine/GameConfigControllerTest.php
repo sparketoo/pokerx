@@ -158,6 +158,39 @@ final class GameConfigControllerTest extends TestCase
         }
     }
 
+    public function test_provider_mode_can_be_saved_read_and_cleared_per_network(): void
+    {
+        $this->signIn(1);
+        $controller = $this->controller();
+
+        foreach (['proto', 'idel', 'mock'] as $provider) {
+            $saved = $this->call($controller, 'save', SaveRequest::class, [
+                'network' => 'OK', 'items' => [['key' => 'provider', 'value' => $provider]],
+            ], 'POST');
+            self::assertSame([['key' => 'provider', 'value' => $provider]], $saved['data']['items']);
+        }
+
+        $read = $this->call($controller, 'index', IndexRequest::class, ['network' => 'OK']);
+        self::assertSame([['key' => 'provider', 'value' => 'mock']], $read['data']['items']);
+        self::assertSame([], $this->call($controller, 'index', IndexRequest::class, ['network' => 'WE'])['data']['items']);
+
+        foreach (['', 'PROTO', 'unknown', '1'] as $provider) {
+            try {
+                $this->call($controller, 'save', SaveRequest::class, [
+                    'network' => 'OK', 'items' => [['key' => 'provider', 'value' => $provider]],
+                ], 'POST');
+                self::fail('Invalid provider mode must be rejected');
+            } catch (ValidationException) {
+                self::assertSame('mock', UserGameConfig::query()->where('user_id', 1)->where('network', 'OK')->where('key', 'provider')->firstOrFail()->value);
+            }
+        }
+
+        $cleared = $this->call($controller, 'save', SaveRequest::class, [
+            'network' => 'OK', 'items' => [['key' => 'provider', 'value' => null]],
+        ], 'POST');
+        self::assertSame([], $cleared['data']['items']);
+    }
+
     public function test_save_accepts_auto_bet_ranges_and_rejects_invalid_seconds(): void
     {
         $this->signIn(1);

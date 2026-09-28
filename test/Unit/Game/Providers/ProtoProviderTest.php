@@ -39,9 +39,9 @@ final class ProtoProviderTest extends TestCase
             );
             $user = new User;
             $user->id = 1;
-            $connectionA = new GameServerConnectionVo(11, $user, 'client-a');
-            $connectionB = new GameServerConnectionVo(12, $user, 'client-b');
-            $connectionARestored = new GameServerConnectionVo(13, $user, 'client-a');
+            $connectionA = new GameServerConnectionVo(11, $user, 'client-a', 'proto');
+            $connectionB = new GameServerConnectionVo(12, $user, 'client-b', 'proto');
+            $connectionARestored = new GameServerConnectionVo(13, $user, 'client-a', 'proto');
 
             $provider->connect($connectionA);
             $provider->connect($connectionB);
@@ -112,8 +112,8 @@ final class ProtoProviderTest extends TestCase
             );
             $user = new User;
             $user->id = 1;
-            $originalConnection = new GameServerConnectionVo(11, $user, 'client-a');
-            $restoredConnection = new GameServerConnectionVo(12, $user, 'client-a');
+            $originalConnection = new GameServerConnectionVo(11, $user, 'client-a', 'proto');
+            $restoredConnection = new GameServerConnectionVo(12, $user, 'client-a', 'proto');
 
             $provider->connect($originalConnection);
             $firstResult = null;

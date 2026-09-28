@@ -76,6 +76,7 @@ final class GameServer implements OnCloseInterface, OnMessageInterface, OnOpenIn
         $disconnect = true;
         $connection = null;
         try {
+
             $token = $request->get['token'] ?? null;
             $locale = $request->get['locale'] ?? null;
             if (! is_string($token) || $token === '') {
@@ -88,16 +89,18 @@ final class GameServer implements OnCloseInterface, OnMessageInterface, OnOpenIn
             }
 
             $clientId = $this->clientId($token->user, $request->get['client_id'] ?? null);
+            $provider = $request->get['provider'] ?? $this->poker->getDefaultProvider();
             $connection = new GameServerConnectionVo(
                 $request->fd,
                 $token->user,
                 $clientId,
+                $provider,
             );
             $this->connections[$request->fd] = $connection;
-            $this->provider()->connect($connection);
+            $this->provider($provider)->connect($connection);
             if (! $this->isCurrentConnection($connection)) {
                 $disconnect = false;
-                $this->provider()->disconnect($connection);
+                $this->provider($provider)->disconnect($connection);
 
                 return;
             }
@@ -117,7 +120,7 @@ final class GameServer implements OnCloseInterface, OnMessageInterface, OnOpenIn
             }
             if ($connection !== null) {
                 try {
-                    $this->provider()->disconnect($connection);
+                    $this->provider($connection->provider)->disconnect($connection);
                 } catch (Throwable $cleanupError) {
                     $this->logger->warning('Poker Server provider disconnect failed', [
                         'fd' => $request->fd,
@@ -210,7 +213,7 @@ final class GameServer implements OnCloseInterface, OnMessageInterface, OnOpenIn
         unset($this->connections[$fd]);
 
         try {
-            $this->provider()->disconnect($connection);
+            $this->provider($connection->provider)->disconnect($connection);
         } catch (Throwable $error) {
             $this->logger->warning('Poker Server provider disconnect failed', [
                 ...($error instanceof AppException ? $error->context() : []),
@@ -297,7 +300,7 @@ final class GameServer implements OnCloseInterface, OnMessageInterface, OnOpenIn
             if (! $this->isCurrentConnection($message->connection)) {
                 throw new RuntimeException('WebSocket connection closed during game creation');
             }
-            $this->provider()->start($game);
+            $this->provider($message->connection->provider)->start($game);
             if ($this->socketServer !== null && is_int($this->socketServer->worker_id ?? null)) {
                 $this->gameService->registerParticipant($game, $message->connection->fd, $this->socketServer->worker_id);
             }
@@ -333,7 +336,7 @@ final class GameServer implements OnCloseInterface, OnMessageInterface, OnOpenIn
             $message->connection->clientId,
         );
 
-        $this->provider()->blindPosted($event);
+        $this->provider($message->connection->provider)->blindPosted($event);
         $this->ack($message->connection, $message->type, $message->id);
     }
 
@@ -354,7 +357,7 @@ final class GameServer implements OnCloseInterface, OnMessageInterface, OnOpenIn
             $message->connection->clientId,
         );
 
-        $this->provider()->dealt($event);
+        $this->provider($message->connection->provider)->dealt($event);
         $this->ack($message->connection, $message->type, $message->id);
         if ($this->socketServer === null) {
             return;
@@ -456,7 +459,7 @@ final class GameServer implements OnCloseInterface, OnMessageInterface, OnOpenIn
             $message->connection->clientId,
         );
 
-        $this->provider()->stage($event);
+        $this->provider($message->connection->provider)->stage($event);
         $this->ack($message->connection, $message->type, $message->id);
     }
 
@@ -480,7 +483,7 @@ final class GameServer implements OnCloseInterface, OnMessageInterface, OnOpenIn
             $message->connection->clientId,
         );
 
-        $this->provider()->action($event);
+        $this->provider($message->connection->provider)->action($event);
         $this->ack($message->connection, $message->type, $message->id);
     }
 
@@ -556,7 +559,7 @@ final class GameServer implements OnCloseInterface, OnMessageInterface, OnOpenIn
             $message->connection->clientId,
         );
 
-        $this->provider()->show($event);
+        $this->provider($message->connection->provider)->show($event);
         $this->ack($message->connection, $message->type, $message->id);
     }
 
@@ -570,7 +573,7 @@ final class GameServer implements OnCloseInterface, OnMessageInterface, OnOpenIn
         if (! $this->isCurrentConnection($message->connection)) {
             return;
         }
-        $this->provider()->requestAction($game,
+        $this->provider($message->connection->provider)->requestAction($game,
             function (RequestActionResultVo $result) use ($game, $message) {
                 if (! $this->isCurrentConnection($message->connection)) {
                     return;
@@ -631,7 +634,7 @@ final class GameServer implements OnCloseInterface, OnMessageInterface, OnOpenIn
         if (! $this->isCurrentConnection($message->connection)) {
             return;
         }
-        $this->provider()->over($event);
+        $this->provider($message->connection->provider)->over($event);
         $this->gameService->queueToStore($event->game);
         $this->ack($message->connection, $message->type, $message->id);
     }
@@ -653,7 +656,7 @@ final class GameServer implements OnCloseInterface, OnMessageInterface, OnOpenIn
             $message->connection->user->id,
             $message->connection->clientId,
         );
-        $this->provider()->abort($event);
+        $this->provider($message->connection->provider)->abort($event);
         $this->gameService->queueToStore($event->game);
         $this->ack($message->connection, $message->type, $message->id);
 
@@ -785,8 +788,8 @@ final class GameServer implements OnCloseInterface, OnMessageInterface, OnOpenIn
         }
     }
 
-    protected function provider(): ProviderInterface
+    protected function provider(string $provider): ProviderInterface
     {
-        return $this->poker->provider();
+        return $this->poker->provider($provider);
     }
 }

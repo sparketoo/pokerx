@@ -17,5 +17,6 @@ class GameServerConnectionVo extends Vo
         public readonly int $fd,
         public readonly User $user,
         public readonly string $clientId,
+        public readonly string $provider,
     ) {}
 }

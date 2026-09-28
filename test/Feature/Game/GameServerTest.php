@@ -88,7 +88,7 @@ final class GameServerTest extends DatabaseTestCase
         $service = new GameService(new GameProviderManager, $redis, $container->get(DriverFactory::class), $container->get(LoggerInterface::class));
         $user = new User;
         $user->id = 1;
-        $connection = new GameServerConnectionVo(11, $user, 'client-a');
+        $connection = new GameServerConnectionVo(11, $user, 'client-a', (new GameProviderManager)->getDefaultProvider());
         $connection->ready = true;
         $sender = new FakeGameServerSender;
         $server = $this->gameServerWithConnections(new class extends BaseProvider
@@ -146,7 +146,7 @@ final class GameServerTest extends DatabaseTestCase
         $service = new GameService(new GameProviderManager, $redis, $container->get(DriverFactory::class), $container->get(LoggerInterface::class));
         $user = new User;
         $user->id = 1;
-        $connection = new GameServerConnectionVo(11, $user, 'client-a');
+        $connection = new GameServerConnectionVo(11, $user, 'client-a', (new GameProviderManager)->getDefaultProvider());
         $connection->ready = true;
         $server = $this->gameServerWithConnections(new class extends BaseProvider
         {
@@ -207,7 +207,7 @@ final class GameServerTest extends DatabaseTestCase
         $service = new GameService(new GameProviderManager, $redis, $container->get(DriverFactory::class), $container->get(LoggerInterface::class));
         $user = new User;
         $user->id = 1;
-        $connection = new GameServerConnectionVo(11, $user, 'client-a');
+        $connection = new GameServerConnectionVo(11, $user, 'client-a', (new GameProviderManager)->getDefaultProvider());
         $server = $this->gameServerWithConnections(new class extends BaseProvider
         {
             public function requestAction(GameVo $game, Closure $callback): void {}
@@ -258,7 +258,7 @@ final class GameServerTest extends DatabaseTestCase
             }
         };
         $user = $this->user();
-        $connection = new GameServerConnectionVo(11, $user, 'client-a');
+        $connection = new GameServerConnectionVo(11, $user, 'client-a', (new GameProviderManager)->getDefaultProvider());
         $server = $this->gameServerWithConnections($provider, [11 => $connection], $sender);
         $server->handleStart(new GameServerMessageVo($connection, 'start-45', 'START', [
             'game_key' => 'empty-sb-'.bin2hex(random_bytes(8)), 'network' => 'OK', 'ante' => 0,
@@ -306,7 +306,7 @@ final class GameServerTest extends DatabaseTestCase
             }
         };
         $user = $this->user();
-        $connection = new GameServerConnectionVo(11, $user, 'client-a');
+        $connection = new GameServerConnectionVo(11, $user, 'client-a', (new GameProviderManager)->getDefaultProvider());
         $server = $this->gameServerWithConnections($provider, [11 => $connection], $sender);
         $payload = [
             'game_key' => 'name-'.bin2hex(random_bytes(8)), 'network' => 'OK', 'ante' => 0,
@@ -412,6 +412,132 @@ final class GameServerTest extends DatabaseTestCase
         self::assertSame($firstClientId, $sender->messages[3]['payload']['client_id']);
     }
 
+    public function test_each_connection_uses_its_selected_provider_for_game_events_and_disconnect(): void
+    {
+        $defaultProvider = new class extends BaseProvider
+        {
+            /** @var list<GameServerConnectionVo> */
+            public array $connected = [];
+
+            /** @var list<GameServerConnectionVo> */
+            public array $disconnected = [];
+
+            /** @var list<GameVo> */
+            public array $started = [];
+
+            /** @var list<GameEventVo> */
+            public array $posted = [];
+
+            public function connect(GameServerConnectionVo $connection): void
+            {
+                $this->connected[] = $connection;
+            }
+
+            public function disconnect(GameServerConnectionVo $connection): void
+            {
+                $this->disconnected[] = $connection;
+            }
+
+            public function start(GameVo $game): void
+            {
+                $this->started[] = $game;
+            }
+
+            public function blindPosted(GameEventVo $event): void
+            {
+                $this->posted[] = $event;
+            }
+
+            public function requestAction(GameVo $game, Closure $callback): void {}
+        };
+        $selectedProvider = clone $defaultProvider;
+        $sender = new FakeGameServerSender;
+        $server = $this->gameServerWithConnections($defaultProvider, [], $sender, additionalProviders: ['test_mode' => $selectedProvider]);
+        $socketServer = new class
+        {
+            /** @var list<int> */
+            public array $disconnected = [];
+
+            public function disconnect(int $fd): void
+            {
+                $this->disconnected[] = $fd;
+            }
+        };
+        $token = $this->token($this->user());
+        $server->onOpen($socketServer, $this->webSocketRequest(11, $token));
+        $server->onOpen($socketServer, $this->webSocketRequest(12, $token, provider: 'test_mode'));
+
+        self::assertSame((new GameProviderManager)->getDefaultProvider(), $defaultProvider->connected[0]->provider);
+        self::assertSame('test_mode', $selectedProvider->connected[0]->provider);
+        self::assertSame(['ACCEPT', 'ACCEPT'], array_column($sender->messages, 'type'));
+
+        foreach ([$defaultProvider->connected[0], $selectedProvider->connected[0]] as $connection) {
+            $server->handleStart(new GameServerMessageVo($connection, 'start-'.$connection->fd, 'START', [
+                'game_key' => 'mode-'.bin2hex(random_bytes(8)), 'network' => 'OK', 'ante' => 0,
+                'small_blind' => 1, 'big_blind' => 2, 'button_seat_number' => 1,
+                'players' => [
+                    ['uid' => 'hero', 'seat' => 1, 'stack' => 100, 'hero' => true],
+                    ['uid' => 'villain', 'seat' => 2, 'stack' => 100, 'hero' => false],
+                ],
+            ], time() * 1000));
+        }
+
+        self::assertCount(1, $defaultProvider->started);
+        self::assertCount(1, $selectedProvider->started);
+        self::assertSame($defaultProvider->connected[0]->clientId, $defaultProvider->started[0]->clientId);
+        self::assertSame($selectedProvider->connected[0]->clientId, $selectedProvider->started[0]->clientId);
+
+        foreach ([$defaultProvider, $selectedProvider] as $gameProvider) {
+            $connection = $gameProvider->connected[0];
+            $server->handleBlindPosted(new GameServerMessageVo($connection, 'blind-'.$connection->fd, 'BLIND_POSTED', [
+                'game_uuid' => $gameProvider->started[0]->uuid, 'uid' => 'hero', 'type' => 'BB', 'amount' => 2,
+            ], time() * 1000));
+        }
+        self::assertCount(1, $defaultProvider->posted);
+        self::assertCount(1, $selectedProvider->posted);
+        self::assertSame($defaultProvider->started[0]->uuid, $defaultProvider->posted[0]->game->uuid);
+        self::assertSame($selectedProvider->started[0]->uuid, $selectedProvider->posted[0]->game->uuid);
+
+        $server->onClose($socketServer, 11, 0);
+        $server->onClose($socketServer, 12, 0);
+        self::assertSame($defaultProvider->connected, $defaultProvider->disconnected);
+        self::assertSame($selectedProvider->connected, $selectedProvider->disconnected);
+        self::assertSame([], $socketServer->disconnected);
+    }
+
+    public function test_unknown_provider_disconnects_without_accepting_connection(): void
+    {
+        $provider = new class extends BaseProvider
+        {
+            public int $connections = 0;
+
+            public function connect(GameServerConnectionVo $connection): void
+            {
+                $this->connections++;
+            }
+
+            public function requestAction(GameVo $game, Closure $callback): void {}
+        };
+        $sender = new FakeGameServerSender;
+        $server = $this->gameServerWithConnections($provider, [], $sender);
+        $socketServer = new class
+        {
+            /** @var list<int> */
+            public array $disconnected = [];
+
+            public function disconnect(int $fd): void
+            {
+                $this->disconnected[] = $fd;
+            }
+        };
+
+        $server->onOpen($socketServer, $this->webSocketRequest(11, $this->token($this->user()), provider: 'missing_test_mode'));
+
+        self::assertSame([11], $socketServer->disconnected);
+        self::assertSame([], $sender->messages);
+        self::assertSame(0, $provider->connections);
+    }
+
     public function test_on_close_notifies_provider_for_disconnected_client(): void
     {
         $provider = new class extends BaseProvider
@@ -429,7 +555,7 @@ final class GameServerTest extends DatabaseTestCase
         $user = new User;
         $user->id = 1;
         $server = $this->gameServerWithConnections($provider, [
-            11 => new GameServerConnectionVo(11, $user, 'client-id'),
+            11 => new GameServerConnectionVo(11, $user, 'client-id', (new GameProviderManager)->getDefaultProvider()),
         ]);
 
         $server->onClose(null, 11, 0);
@@ -657,17 +783,24 @@ final class GameServerTest extends DatabaseTestCase
         self::assertSame([42], $server->disconnected);
     }
 
-    /** @param array<int, GameServerConnectionVo> $connections */
+    /**
+     * @param  array<int, GameServerConnectionVo>  $connections
+     * @param  array<string, BaseProvider>  $additionalProviders
+     */
     private function gameServerWithConnections(
         BaseProvider $provider,
         array $connections,
         ?Sender $sender = null,
         ?GameService $gameService = null,
         ?UserGameConfigService $configs = null,
+        array $additionalProviders = [],
     ): GameServer {
         $container = ApplicationContext::getContainer();
         $manager = new GameProviderManager;
         $manager->extend($manager->getDefaultProvider(), static fn (): ProviderInterface => $provider);
+        foreach ($additionalProviders as $name => $additionalProvider) {
+            $manager->extend($name, static fn (): ProviderInterface => $additionalProvider);
+        }
         $server = new GameServer(
             $sender ?? $container->get(Sender::class),
             $manager,
@@ -684,13 +817,16 @@ final class GameServerTest extends DatabaseTestCase
         return $server;
     }
 
-    private function webSocketRequest(int $fd, string $token, ?string $clientId = null): SwooleRequest
+    private function webSocketRequest(int $fd, string $token, ?string $clientId = null, ?string $provider = null): SwooleRequest
     {
         $request = new SwooleRequest;
         $request->fd = $fd;
         $request->get = ['token' => $token];
         if ($clientId !== null) {
             $request->get['client_id'] = $clientId;
+        }
+        if ($provider !== null) {
+            $request->get['provider'] = $provider;
         }
 
         return $request;

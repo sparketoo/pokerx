@@ -32,10 +32,10 @@ return new class extends Migration
             $table->bigInteger('profit')->comment('本人游戏收益：winnings-total-insurance_amount+insurance_payout');
             $table->timestamps(6);
 
-            $table->unique(['user_id', 'network', 'game_key', 'hero_uid']);
             $table->index(['user_id', 'created_at', 'id']);
             $table->index(['user_id', 'status']);
             $table->index(['user_id', 'profit']);
+            $table->unique(['user_id', 'network', 'game_key']);
         });
     }
 

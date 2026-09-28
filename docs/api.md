@@ -242,14 +242,16 @@ HTTP 的通用错误码包括 `auth_failed`、`auth_required`、`two_factor_requ
 | --- | --- |
 | `network` | 必填；`OK`、`WE`、`WPK`、`WPK_CLUB` 或 `YW` |
 | `items` | 必填；1–20 项，不能重复 `key`；只修改提交的配置项 |
-| `items[].key` | `insurance_default`、`insurance_outs_1` 至 `insurance_outs_8`，`auto_bet_fold`、`auto_bet_check`、`auto_bet_call`、`auto_bet_bet`、`auto_bet_raise`、`auto_bet_all_in`、`auto_bet_insurance`，或 `share_hole_cards`；旧的三个自动执行分组键仍可读取和保存 |
-| `items[].value` | 保险键接受 `MIN`、`MAX`、`1`、`1/2`、`1/3`、`1/5`、`1/8`；自动下注键接受 0–10 秒的 `min-max` 字符串；`share_hole_cards` 仅接受字符串 `"1"`；`null` 删除对应配置。 |
+| `items[].key` | `insurance_default`、`insurance_outs_1` 至 `insurance_outs_8`，`auto_bet_fold`、`auto_bet_check`、`auto_bet_call`、`auto_bet_bet`、`auto_bet_raise`、`auto_bet_all_in`、`auto_bet_insurance`、`share_hole_cards` 或 `provider`；旧的三个自动执行分组键仍可读取和保存 |
+| `items[].value` | 保险键接受 `MIN`、`MAX`、`1`、`1/2`、`1/3`、`1/5`、`1/8`；自动下注键接受 0–10 秒的 `min-max` 字符串；`share_hole_cards` 仅接受字符串 `"1"`；`provider` 接受 `proto`、`idel`、`mock`；`null` 删除对应配置。 |
 
 自动执行延迟分别对应弃牌、过牌、跟注、下注、加注、全下和保险，每项可单独设置。值为 `min-max` 秒，例如 `0-10`；两端均为 0–10 的整数，且 `min <= max`。未配置时客户端使用 2–3 秒。读取旧分组配置时，客户端将对应范围分别用于该组内的行动；同一行动的新键优先。
 
 比例档按 `floor(pot × 比例 ÷ odds)` 计算原始投保额，然后限制在服务端报价的 `min` 与 `max` 内；`1` 使用报价中的 `breakeven`，`MAX` 使用 `max`，`MIN` 使用 `min`，即使 `min` 为 0 也返回 0。未设置具体 outs 档位时使用 `insurance_default`；两者都未设置时，若报价有效则使用 `min`。有效报价下返回的每个投保额都不低于 `min`。
 
 保存成功后返回该用户、该网络的完整配置列表，格式与 GET 相同。这两个接口只读写用户游戏设置，不写入保险购买记录。
+
+`provider` 未配置时前端显示默认模式 `proto`。本接口只保存并读回该设置；GameServer 从 WebSocket 连接参数选择 provider，尚未从此配置读取。
 
 `share_hole_cards` 默认关闭。将它保存为 `"1"` 表示该用户在这个 `network` 下**共享自己的手牌**；发送 `null` 关闭后，GET 结果中不再包含该键。开关只决定自己的 `DEALT` 是否向同局其他客户端共享，不限制自己接收已开启共享的其他玩家手牌。同一用户打开不同客户端、分别操作不同 Hero 时也按各自 Hero 的 UID 区分。
 
