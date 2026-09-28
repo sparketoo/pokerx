@@ -7,7 +7,7 @@ services:
       dockerfile: Dockerfile
       args:
         APP_TIMESTAMP: ${APP_TIMESTAMP}
-    image: pokerx:v1.0.5
+    image: pokerx:v1.1.3
     restart: unless-stopped
     environment:
       APP_NAME: ${APP_NAME:-PokerX}
