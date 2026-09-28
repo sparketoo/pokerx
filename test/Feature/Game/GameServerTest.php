@@ -24,6 +24,7 @@ use Hyperf\Database\ConnectionResolverInterface;
 use Hyperf\Di\Container;
 use Hyperf\Redis\Redis;
 use Hyperf\Validation\Contract\ValidatorFactoryInterface;
+use Hyperf\Validation\ValidationException;
 use Hyperf\WebSocketServer\Sender;
 use Illuminate\Encryption\Encrypter;
 use Psr\Log\LoggerInterface;
@@ -151,6 +152,57 @@ final class GameServerTest extends DatabaseTestCase
         ], time() * 1000));
         self::assertSame('BB', $provider->posted?->payload['type']);
         self::assertSame(2, $provider->posted->game->pot());
+    }
+
+    public function test_start_accepts_player_names_up_to_32_characters(): void
+    {
+        $provider = new class extends BaseProvider
+        {
+            public ?GameVo $started = null;
+
+            public function start(GameVo $game): void
+            {
+                $this->started = $game;
+            }
+
+            public function requestAction(GameVo $game, Closure $callback): void {}
+        };
+        $sender = new class extends Sender
+        {
+            public function __construct() {}
+
+            /** @param array<int, mixed> $arguments */
+            public function __call(string $name, array $arguments): bool
+            {
+                return true;
+            }
+        };
+        $user = $this->user();
+        $connection = new GameServerConnectionVo(11, $user, 'client-a');
+        $server = $this->gameServerWithConnections($provider, [11 => $connection], $sender);
+        $payload = [
+            'game_key' => 'name-'.bin2hex(random_bytes(8)), 'network' => 'OK', 'ante' => 0,
+            'small_blind' => 1, 'big_blind' => 2, 'button_seat_number' => 1,
+            'players' => [
+                ['uid' => 'hero', 'name' => str_repeat('玩', 32), 'seat' => 1, 'stack' => 100, 'hero' => true],
+                ['uid' => 'villain', 'name' => 'Opponent', 'seat' => 2, 'stack' => 100, 'hero' => false],
+            ],
+        ];
+
+        $server->handleStart(new GameServerMessageVo($connection, 'start-name-32', 'START', $payload, time() * 1000));
+
+        self::assertNotNull($provider->started);
+        $player = $provider->started->players->first();
+        self::assertNotNull($player);
+        self::assertSame(str_repeat('玩', 32), $player->name);
+
+        $payload['players'][0]['name'] = str_repeat('玩', 33);
+        try {
+            $server->handleStart(new GameServerMessageVo($connection, 'start-name-33', 'START', $payload, time() * 1000));
+            self::fail('Player names longer than 32 characters must be rejected');
+        } catch (ValidationException) {
+            self::assertNotNull($provider->started);
+        }
     }
 
     public function test_each_websocket_gets_its_own_client_identity_and_reconnect_restores_it(): void

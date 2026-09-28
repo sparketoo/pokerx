@@ -260,7 +260,7 @@ final class GameServer implements OnCloseInterface, OnMessageInterface, OnOpenIn
             'players.*' => ['required', 'array'],
             'players.*.seat' => ['required', 'integer', 'min:1', 'max:10', 'distinct'],
             'players.*.uid' => ['required', 'string', 'regex:/\A[A-Za-z0-9]{1,16}\z/', 'distinct:ignore_case'],
-            'players.*.name' => ['string', 'max:16'],
+            'players.*.name' => ['string', 'max:32'],
             'players.*.hero' => ['required', 'boolean'],
             'players.*.stack' => ['required', 'integer:strict', 'min:0', 'max:100000000'],
         ])->validate();
