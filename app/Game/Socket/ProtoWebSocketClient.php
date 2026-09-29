@@ -54,7 +54,8 @@ final class ProtoWebSocketClient extends WebSocketClient
         $url = (string) ($options['url'] ?? '');
         $this->token = (string) ($options['token'] ?? '');
         if ($url === '' || $this->token === '' || $clientKey === '') {
-            throw new ProviderException(__('messages.provider.unavailable', [], $this->locale), ErrorCode::PROVIDER_UNAVAILABLE, context: ['reason' => 'configuration_missing']);
+            throw new ProviderException(__('messages.provider.unavailable', [], $this->locale),
+                ErrorCode::PROVIDER_UNAVAILABLE, context: ['reason' => 'configuration_missing']);
         }
         $pid = ($options['player_id'] ?? 'pokerx').'-'.$clientKey;
         $url .= (str_contains($url, '?') ? '&' : '?').'pid='.rawurlencode($pid);
@@ -81,7 +82,8 @@ final class ProtoWebSocketClient extends WebSocketClient
         $this->leaseOwner = bin2hex(random_bytes(16));
         if ($this->redis->set($this->leaseKey, $this->leaseOwner, ['NX', 'EX' => self::LEASE_TTL]) !== true) {
             $this->leaseOwner = null;
-            throw new ProviderException(__('messages.provider.unavailable', [], $this->locale), ErrorCode::PROVIDER_UNAVAILABLE, context: ['reason' => 'lease_unavailable']);
+            throw new ProviderException(__('messages.provider.unavailable', [], $this->locale),
+                ErrorCode::PROVIDER_UNAVAILABLE, context: ['reason' => 'lease_unavailable']);
         }
         try {
             parent::connect();
@@ -105,7 +107,8 @@ final class ProtoWebSocketClient extends WebSocketClient
     public function request(string $gameId, array $events, array $question): array
     {
         if (isset($this->pendingAnswers[$gameId])) {
-            throw new GameException(__('messages.game.action_in_progress', [], $this->locale), ErrorCode::REQUEST_ACTION_IN_PROGRESS);
+            throw new GameException(__('messages.game.action_in_progress', [], $this->locale),
+                ErrorCode::REQUEST_ACTION_IN_PROGRESS);
         }
         $answer = new Channel(1);
         $this->pendingAnswers[$gameId] = $answer;
@@ -117,7 +120,8 @@ final class ProtoWebSocketClient extends WebSocketClient
                 throw $response;
             }
             if (! is_array($response)) {
-                throw new ProviderException(__('messages.provider.request_timeout', [], $this->locale), ErrorCode::PROVIDER_REQUEST_TIMEOUT, context: ['reason' => 'action_timeout', 'game_id' => $gameId]);
+                throw new ProviderException(__('messages.provider.request_timeout', [], $this->locale),
+                    ErrorCode::PROVIDER_REQUEST_TIMEOUT, context: ['reason' => 'action_timeout', 'game_id' => $gameId]);
             }
 
             return $response;
@@ -127,7 +131,7 @@ final class ProtoWebSocketClient extends WebSocketClient
         }
     }
 
-    /** @param array<string, mixed> $message */
+    /** @param  array<string, mixed>  $message */
     public function sendMessage(array $message): void
     {
         $this->sendText(json_encode($message, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE));
@@ -142,7 +146,8 @@ final class ProtoWebSocketClient extends WebSocketClient
             $message['sessionId'] = $previous;
         }
         if (! $socket->push(json_encode($message, JSON_THROW_ON_ERROR))) {
-            throw new ProviderException(__('messages.provider.unavailable', [], $this->locale), ErrorCode::PROVIDER_UNAVAILABLE, context: ['reason' => 'authentication_write_failed']);
+            throw new ProviderException(__('messages.provider.unavailable', [], $this->locale),
+                ErrorCode::PROVIDER_UNAVAILABLE, context: ['reason' => 'authentication_write_failed']);
         }
         $frame = $socket->recv((float) ($this->options['connect_timeout'] ?? 5.0));
         try {
@@ -156,7 +161,8 @@ final class ProtoWebSocketClient extends WebSocketClient
             $remoteInfo = is_array($response) && is_string($response['info'] ?? null) ? $response['info'] : '';
             $info = strtolower($remoteInfo);
             if ($previous !== null && str_contains($info, 'session')
-                && (str_contains($info, 'invalid') || str_contains($info, 'expired') || str_contains($info, 'not found'))) {
+                && (str_contains($info, 'invalid') || str_contains($info, 'expired') || str_contains($info,
+                    'not found'))) {
                 $this->redis->eval(
                     "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) end return 0",
                     [$this->sessionKey, $previous],
@@ -165,11 +171,12 @@ final class ProtoWebSocketClient extends WebSocketClient
                 $this->sessionId = null;
                 $this->retryFreshSession = true;
             }
-            throw new ProviderException(__('messages.provider.failed', [], $this->locale), ErrorCode::PROVIDER_FAILED, context: [
-                'reason' => 'authentication_failed',
-                'remote_info' => $this->safeDiagnostic($remoteInfo, $previous),
-                'session_id_present' => $previous !== null,
-            ]);
+            throw new ProviderException(__('messages.provider.failed', [], $this->locale), ErrorCode::PROVIDER_FAILED,
+                context: [
+                    'reason' => 'authentication_failed',
+                    'remote_info' => $this->safeDiagnostic($remoteInfo, $previous),
+                    'session_id_present' => $previous !== null,
+                ]);
         }
 
         $this->sessionId = $response['sessionId'];
@@ -179,7 +186,8 @@ final class ProtoWebSocketClient extends WebSocketClient
             2,
         );
         if ((int) $saved !== 1) {
-            throw new ProviderException(__('messages.provider.unavailable', [], $this->locale), ErrorCode::PROVIDER_UNAVAILABLE, context: ['reason' => 'lease_lost']);
+            throw new ProviderException(__('messages.provider.unavailable', [], $this->locale),
+                ErrorCode::PROVIDER_UNAVAILABLE, context: ['reason' => 'lease_lost']);
         }
     }
 
@@ -198,17 +206,31 @@ final class ProtoWebSocketClient extends WebSocketClient
         try {
             $response = json_decode($text, true, 64, JSON_THROW_ON_ERROR);
         } catch (JsonException $error) {
-            throw new ProviderException(__('messages.provider.failed', [], $this->locale), ErrorCode::PROVIDER_FAILED, previous: $error, context: ['reason' => 'invalid_json']);
+            if (trim($text) === 'timeout') {
+                throw new ProviderException(__('messages.provider.unavailable', [], $this->locale),
+                    ErrorCode::PROVIDER_UNAVAILABLE, context: ['reason' => 'upstream_timeout']);
+            }
+
+            throw new ProviderException(__('messages.provider.failed', [], $this->locale), ErrorCode::PROVIDER_FAILED,
+                previous: $error, context: [
+                    'reason' => 'invalid_json',
+                    'remote_error' => $this->safeDiagnostic($text),
+                ]);
         }
         if (! is_array($response)) {
-            throw new ProviderException(__('messages.provider.failed', [], $this->locale), ErrorCode::PROVIDER_FAILED, context: ['reason' => 'invalid_message']);
+            throw new ProviderException(
+                __('messages.provider.failed', [], $this->locale),
+                ErrorCode::PROVIDER_FAILED,
+                context: ['reason' => 'invalid_message', 'message' => $text],
+            );
         }
         if (is_string($response['error'] ?? null)) {
-            $error = new ProviderException(__('messages.provider.failed', [], $this->locale), ErrorCode::PROVIDER_FAILED, context: [
-                'reason' => 'request_rejected',
-                'remote_error' => $this->safeDiagnostic($response['error']),
-                'game_id' => is_string($response['gameId'] ?? null) ? $response['gameId'] : null,
-            ]);
+            $error = new ProviderException(__('messages.provider.failed', [], $this->locale),
+                ErrorCode::PROVIDER_FAILED, context: [
+                    'reason' => 'request_rejected',
+                    'remote_error' => $this->safeDiagnostic($response['error']),
+                    'game_id' => is_string($response['gameId'] ?? null) ? $response['gameId'] : null,
+                ]);
             $gameId = $response['gameId'] ?? null;
             if (is_string($gameId)) {
                 ($this->pendingAnswers[$gameId] ?? null)?->push($error, 0.001);
@@ -228,7 +250,8 @@ final class ProtoWebSocketClient extends WebSocketClient
     protected function onDisconnected(): void
     {
         foreach ($this->pendingAnswers as $channel) {
-            $channel->push(new ProviderException(__('messages.provider.unavailable', [], $this->locale), ErrorCode::PROVIDER_UNAVAILABLE, context: ['reason' => 'connection_closed']), 0.001);
+            $channel->push(new ProviderException(__('messages.provider.unavailable', [], $this->locale),
+                ErrorCode::PROVIDER_UNAVAILABLE, context: ['reason' => 'connection_closed']), 0.001);
         }
     }
 

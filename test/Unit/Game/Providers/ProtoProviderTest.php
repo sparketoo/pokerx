@@ -12,6 +12,7 @@ use App\Vo\Game\GameServerConnectionVo;
 use App\Vo\Game\RequestActionResultVo;
 use Hyperf\Redis\Redis;
 use Swoole\Coroutine;
+use Swoole\Coroutine\Channel;
 use Swoole\Coroutine\Http\Client;
 use Tests\Fixtures\FakeWebSocketTransport;
 use Tests\Fixtures\GameVoFixture;
@@ -142,6 +143,60 @@ final class ProtoProviderTest extends TestCase
             self::assertSame($game->uuid, $answerRequest['gameId']);
             self::assertSame(15000, $answerRequest['delay']);
             $provider->disconnect($restoredConnection);
+        });
+    }
+
+    public function test_upstream_timeout_reconnects_with_the_existing_session(): void
+    {
+        Coroutine\run(function (): void {
+            $redis = $this->redis();
+            $game = GameVoFixture::headsUp(clientId: 'client-a');
+            $first = new FakeWebSocketTransport;
+            $first->receive('{"result":true,"sessionId":"existing-session"}');
+            $second = new FakeWebSocketTransport;
+            $second->receive('{"result":true,"sessionId":"existing-session"}');
+            $reconnected = new Channel(1);
+            $second->onPush = static function (mixed $data, int $opcode) use ($second, $game, $reconnected): void {
+                if ($opcode !== SWOOLE_WEBSOCKET_OPCODE_TEXT || ! is_string($data)) {
+                    return;
+                }
+                $message = json_decode($data, true, 512, JSON_THROW_ON_ERROR);
+                if (isset($message['token'])) {
+                    $reconnected->push(true);
+                } elseif (($message['structType'] ?? null) === 'getAnswer') {
+                    $second->receive(json_encode([
+                        'structType' => 'playerAction', 'gameId' => $game->uuid,
+                        'action' => 'check', 'amount' => 0,
+                    ], JSON_THROW_ON_ERROR));
+                }
+            };
+            $transports = [$first, $second];
+            $provider = new ProtoProvider(
+                ['url' => 'ws://proto.test/', 'token' => 'upstream-token'],
+                $redis,
+                static function () use (&$transports): Client {
+                    return array_shift($transports) ?? throw new \RuntimeException('No transport available');
+                },
+            );
+            $user = new User;
+            $user->id = 1;
+            $connection = new GameServerConnectionVo(11, $user, 'client-a', 'proto');
+
+            $provider->connect($connection);
+            $first->receive('timeout');
+            self::assertTrue($reconnected->pop(2.0));
+
+            self::assertTrue($first->closed);
+            self::assertNotEmpty($second->sent);
+            $authentication = json_decode($second->sent[0]['data'], true, 512, JSON_THROW_ON_ERROR);
+            self::assertSame('existing-session', $authentication['sessionId']);
+            $result = null;
+            $provider->requestAction($game, static function (RequestActionResultVo $answer) use (&$result): void {
+                $result = $answer;
+            });
+            self::assertSame(ActionEnum::CHECK, $result?->action);
+
+            $provider->disconnect($connection);
         });
     }
 
