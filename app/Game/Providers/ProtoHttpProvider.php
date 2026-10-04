@@ -500,8 +500,8 @@ final class ProtoHttpProvider extends BaseProvider
             }
         }
         $handEvents = $game->events->sortBy('timestamp')->values()->all();
-        // YW may reveal Hero's cards only on their turn; Proto expects cards before preflop actions.
-        if ($game->network->isYw()) {
+        // YW 和 WPK 可能在其他玩家行动后才揭示 Hero 手牌；Proto 要求发牌先于行动。
+        if ($game->network->isYw() || $game->network->isWpkClub()) {
             $firstActionIndex = null;
             $dealtIndex = null;
             foreach ($handEvents as $index => $event) {

@@ -911,6 +911,26 @@ final class ProtoHttpProviderTest extends TestCase
         ));
     }
 
+    public function test_wpk_places_late_hero_cards_before_preflop_actions_in_proto_messages(): void
+    {
+        $game = new GameVo(1, '12345678-90ab-4cde-8f01-23456789abe0', NetworkEnum::WPK_CLUB, 'room#hand-1', 100, 50, 0, [
+            ['uid' => 'hero', 'seat' => 1, 'stack' => 10000, 'hero' => true],
+            ['uid' => 'villain', 'seat' => 2, 'stack' => 10000, 'hero' => false],
+        ], 1, 'client-a');
+        $game->event(GameEventTypeEnum::STAGE, ['stage' => 'PREFLOP', 'cards' => []], 1);
+        $game->event(GameEventTypeEnum::ACTION, ['uid' => 'villain', 'action' => 'CALL', 'amount' => 100], 2);
+        $game->event(GameEventTypeEnum::DEALT, ['cards' => ['7d', '5s']], 3);
+        $provider = new ProtoHttpProvider(['url' => 'https://proto.example']);
+
+        self::assertSame(['stageStarted', 'handDealt', 'playerActed'], array_slice(
+            array_column($provider->gameEvents($game)['events'], 'eventType'), -3,
+        ));
+        self::assertSame(['STAGE', 'ACTION', 'DEALT'], array_map(
+            static fn (GameEventVo $event): string => $event->type->name,
+            $game->events->all(),
+        ));
+    }
+
     public function test_yw_does_not_invent_hero_cards_when_they_were_not_observed(): void
     {
         $game = new GameVo(1, '12345678-90ab-4cde-8f01-23456789abd1', NetworkEnum::YW, '36016#hand-2', 20, 10, 0, [
