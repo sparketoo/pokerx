@@ -265,14 +265,21 @@ final class GameServer implements OnCloseInterface, OnMessageInterface, OnOpenIn
             'big_blind' => ['required', 'integer', 'min:1'],
             'small_blind' => ['required', 'integer', 'min:0'],
             'network' => ['required', 'string', 'in:'.NetworkEnum::implode()],
+            'gameType' => ['sometimes', 'string', 'in:NL,SQUID'],
+            'squidMode' => ['sometimes', 'string', 'in:STAND_UP,HUNT'],
+            'squidCost' => ['sometimes', 'integer:strict', 'min:1', 'max:100000000'],
+            'squidNumber' => ['sometimes', 'integer:strict', 'min:1', 'max:1000000'],
+            'squidRound' => ['sometimes', 'integer:strict', 'min:1'],
+            'squidPlayed' => ['sometimes', 'integer:strict', 'min:0', 'max:1000000'],
             'button_seat_number' => ['required', 'integer', 'min:1', 'max:10'],
             'players' => ['required', 'array', 'list', 'min:2'],
             'players.*' => ['required', 'array'],
             'players.*.seat' => ['required', 'integer', 'min:1', 'max:10', 'distinct'],
             'players.*.uid' => ['required', 'string', 'regex:/\A[A-Za-z0-9]{1,16}\z/', 'distinct:ignore_case'],
-            'players.*.name' => ['string', 'max:32'],
+            'players.*.name' => ['string', 'max:128'],
             'players.*.hero' => ['required', 'boolean'],
             'players.*.stack' => ['required', 'integer:strict', 'min:0', 'max:100000000'],
+            'players.*.squidNumber' => ['sometimes', 'integer:strict', 'min:0', 'max:1000000'],
         ])->validate();
 
         foreach ($payload['players'] as &$player) {
@@ -294,6 +301,12 @@ final class GameServer implements OnCloseInterface, OnMessageInterface, OnOpenIn
             $payload['players'],
             $payload['button_seat_number'],
             $message->connection->clientId,
+            $payload['gameType'] ?? 'NL',
+            $payload['squidMode'] ?? 'STAND_UP',
+            $payload['squidCost'] ?? 0,
+            $payload['squidNumber'] ?? 0,
+            $payload['squidRound'] ?? 0,
+            $payload['squidPlayed'] ?? null,
         );
 
         try {
@@ -563,6 +576,26 @@ final class GameServer implements OnCloseInterface, OnMessageInterface, OnOpenIn
         $this->ack($message->connection, $message->type, $message->id);
     }
 
+    public function handleGotSquid(GameServerMessageVo $message): void
+    {
+        $payload = $this->validatorFactory->make($message->payload, [
+            'game_uuid' => ['required', 'uuid'],
+            'uid' => ['required', 'string', 'regex:/\A[A-Za-z0-9]{1,16}\z/'],
+            'count' => ['required', 'integer:strict', 'min:1', 'max:1000000'],
+        ])->validate();
+        $payload['uid'] = strtolower($payload['uid']);
+
+        $this->gameService->event(
+            $payload['game_uuid'],
+            GameEventTypeEnum::GOT_SQUID,
+            $payload,
+            $message->timestamp,
+            $message->connection->user->id,
+            $message->connection->clientId,
+        );
+        $this->ack($message->connection, $message->type, $message->id);
+    }
+
     public function handleRequestAction(GameServerMessageVo $message): void
     {
         $payload = $this->validatorFactory->make($message->payload, [
@@ -601,7 +634,7 @@ final class GameServer implements OnCloseInterface, OnMessageInterface, OnOpenIn
     }
 
     /**
-     * 游戏结束
+     * 游戏结束。鱿鱼局需先上报本手 GOT_SQUID，整轮收支确认后再将其放入 OVER.squid。
      */
     public function handleOver(GameServerMessageVo $message): void
     {
@@ -621,6 +654,11 @@ final class GameServer implements OnCloseInterface, OnMessageInterface, OnOpenIn
             'shown.*.uid' => ['required', 'string', 'regex:/\A[A-Za-z0-9]{1,16}\z/'],
             'shown.*.cards' => ['required', 'array', 'list', 'size:2'],
             'shown.*.cards.*' => ['required', 'string', 'max:3'],
+            'squid' => ['sometimes', 'array', 'list'],
+            'squid.*' => ['required', 'array'],
+            'squid.*.type' => ['required', 'string', 'in:penaly,payout'],
+            'squid.*.uid' => ['required', 'string', 'regex:/\A[A-Za-z0-9]{1,16}\z/'],
+            'squid.*.amount' => ['required', 'integer:strict', 'min:1', 'max:1000000000000'],
         ])->validate();
 
         $event = $this->gameService->event(

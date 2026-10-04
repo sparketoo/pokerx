@@ -19,6 +19,13 @@ use Hyperf\Database\Model\Relations\HasMany;
  * @property string $game_key 平台牌局标识
  * @property string $hero_uid 本客户端对应的玩家UID
  * @property string $provider 服务商
+ * @property string $game_type 牌局类型
+ * @property null|string $squid_mode 鱿鱼模式
+ * @property null|int $squid_cost 单个鱿鱼价值
+ * @property null|int $squid_number 本轮鱿鱼总数
+ * @property null|int $squid_round 鱿鱼轮次
+ * @property null|int $squid_played 本手开始前已发出的鱿鱼数
+ * @property null|array<string, int> $squid_players 本手开始前各玩家持有数
  * @property int $players 玩家数量
  * @property NetworkEnum $network 扑克网络
  * @property int $big_blind 大盲注
@@ -42,6 +49,11 @@ class Game extends Model
     /** @var array<string, string> */
     protected array $casts = [
         'network' => NetworkEnum::class,
+        'squid_cost' => 'integer',
+        'squid_number' => 'integer',
+        'squid_round' => 'integer',
+        'squid_played' => 'integer',
+        'squid_players' => 'array',
         'status' => GameStatusEnum::class,
         'players' => 'integer',
         'big_blind' => 'integer',

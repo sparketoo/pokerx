@@ -35,12 +35,42 @@ final class GameService
 
     private const int EVENT_UPDATE_ATTEMPTS = 12;
 
+    private const int SQUID_ROUND_TTL = 86400;
+
     private const string UPDATE_GAME_SCRIPT = <<<'LUA'
 if redis.call('GET', KEYS[1]) == ARGV[1] then
     redis.call('SETEX', KEYS[1], 3600, ARGV[2])
     return 1
 end
 return 0
+LUA;
+
+    private const string UPDATE_SQUID_GAME_SCRIPT = <<<'LUA'
+if redis.call('GET', KEYS[1]) ~= ARGV[1] then
+    return 0
+end
+local played = tonumber(redis.call('HGET', KEYS[2], '__played') or '0')
+if played ~= tonumber(ARGV[6]) or played + tonumber(ARGV[4]) > tonumber(ARGV[5]) then
+    return -1
+end
+redis.call('SETEX', KEYS[1], 3600, ARGV[2])
+redis.call('HINCRBY', KEYS[2], '__played', ARGV[4])
+redis.call('HINCRBY', KEYS[2], ARGV[3], ARGV[4])
+redis.call('EXPIRE', KEYS[2], 86400)
+return 1
+LUA;
+
+    private const string INIT_SQUID_ROUND_SCRIPT = <<<'LUA'
+local current = tonumber(redis.call('HGET', KEYS[1], '__played') or '-1')
+if current > tonumber(ARGV[1]) then
+    return -1
+end
+redis.call('HSET', KEYS[1], '__played', ARGV[1])
+for index = 3, #ARGV, 2 do
+    redis.call('HSET', KEYS[1], ARGV[index], ARGV[index + 1])
+end
+redis.call('EXPIRE', KEYS[1], ARGV[2])
+return 1
 LUA;
 
     public function __construct(
@@ -51,7 +81,7 @@ LUA;
     ) {}
 
     /**
-     * @param  list<array{uid:string,name:string,seat:int,stack:int,hero:bool}>  $players
+     * @param  list<array{uid:string,name?:string,seat:int,stack:int,hero:bool,squidNumber?:int}>  $players
      *
      * @throws GameException
      */
@@ -65,8 +95,42 @@ LUA;
         array $players,
         int $buttonSeatNumber,
         string $clientId,
+        string $gameType = 'NL',
+        string $squidMode = 'STAND_UP',
+        int $squidCost = 0,
+        int $squidNumber = 0,
+        int $squidRound = 0,
+        ?int $initialSquidPlayed = null,
     ): GameVo {
         $uuid = Str::uuid()->toString();
+        $squidPlayed = 0;
+        $squidPlayers = [];
+        $roundKey = null;
+        if ($gameType === 'SQUID') {
+            if ($initialSquidPlayed === null) {
+                throw new GameException(__('messages.game.event_invalid'), ErrorCode::EVENT_INVALID);
+            }
+            $heroUid = '';
+            foreach ($players as $player) {
+                if ($player['hero']) {
+                    $heroUid = strtolower($player['uid']);
+                    break;
+                }
+            }
+            $roundKey = $this->squidRoundKey($userId, $network, $gameKey, $squidRound, $heroUid);
+            $squidPlayed = $initialSquidPlayed;
+            foreach ($players as $player) {
+                if (! isset($player['squidNumber'])) {
+                    throw new GameException(__('messages.game.event_invalid'), ErrorCode::EVENT_INVALID);
+                }
+                $squidPlayers[strtolower($player['uid'])] = $player['squidNumber'];
+            }
+            if (array_sum($squidPlayers) > $squidPlayed) {
+                throw new GameException(__('messages.game.event_invalid'), ErrorCode::EVENT_INVALID);
+            }
+        } elseif ($initialSquidPlayed !== null) {
+            throw new GameException(__('messages.game.event_invalid'), ErrorCode::EVENT_INVALID);
+        }
         $game = new GameVo(
             $userId,
             $uuid,
@@ -78,6 +142,13 @@ LUA;
             $players,
             $buttonSeatNumber,
             $clientId,
+            $gameType,
+            $squidMode,
+            $squidCost,
+            $squidNumber,
+            $squidRound,
+            $squidPlayed,
+            $squidPlayers,
         );
         $heroUid = $game->hero()->uid;
         $existsKey = 'game:'.$userId.':'.$network->name.':'.$gameKey.':'.$heroUid;
@@ -90,6 +161,17 @@ LUA;
 
         if ($exists) {
             throw new GameException(__('messages.game.already_exists'), ErrorCode::GAME_ALREADY_EXISTS);
+        }
+        if ($roundKey !== null) {
+            // OK 快照只能推进同一轮进度，不能被另一个 Worker 的旧 START 回退。
+            $arguments = [$roundKey, $squidPlayed, self::SQUID_ROUND_TTL];
+            foreach ($squidPlayers as $uid => $count) {
+                $arguments[] = $uid;
+                $arguments[] = $count;
+            }
+            if ($this->redis->eval(self::INIT_SQUID_ROUND_SCRIPT, $arguments, 1) !== 1) {
+                throw new GameException(__('messages.game.event_invalid'), ErrorCode::EVENT_INVALID);
+            }
         }
         $this->redis->setex($existsKey, 4000, '1');
         $this->save($game);
@@ -216,8 +298,21 @@ LUA;
                 return $event;
             }
             // 所有事件共用 CAS，避免另一个 Worker 的普通牌局事件覆盖保险流水。
-            if ($this->redis->eval(self::UPDATE_GAME_SCRIPT, [$key, $previous, serialize($game)], 1) === 1) {
+            if ($type->isGotSquid()) {
+                $roundKey = $this->squidRoundKey($game->userId, $game->network, $game->gameKey,
+                    $game->squidRound, $game->hero()->uid);
+                $updated = $this->redis->eval(self::UPDATE_SQUID_GAME_SCRIPT, [
+                    $key, $roundKey, $previous, serialize($game), $event->payload['uid'],
+                    $event->payload['count'], $game->squidNumber, $game->squidPlayed,
+                ], 2);
+            } else {
+                $updated = $this->redis->eval(self::UPDATE_GAME_SCRIPT, [$key, $previous, serialize($game)], 1);
+            }
+            if ($updated === 1) {
                 return $event;
+            }
+            if ($updated === -1) {
+                throw new GameException(__('messages.game.event_invalid'), ErrorCode::EVENT_INVALID);
             }
         }
 
@@ -228,6 +323,16 @@ LUA;
     public function purchaseInsurance(string $uuid, array $payload, int $timestamp, int $userId, string $clientId): GameEventVo
     {
         return $this->event($uuid, GameEventTypeEnum::INSURANCE_PURCHASED, $payload, $timestamp, $userId, $clientId);
+    }
+
+    private function squidRoundKey(int $userId, NetworkEnum $network, string $gameKey, int $round, string $heroUid): string
+    {
+        $room = strstr($gameKey, '#', true);
+        if ($room === false || $room === '' || $round < 1 || $heroUid === '') {
+            throw new GameException(__('messages.game.event_invalid'), ErrorCode::EVENT_INVALID);
+        }
+
+        return 'game:squid:'.$userId.':'.$network->name.':'.$room.':'.$round.':'.strtolower($heroUid);
     }
 
     public function queueToStore(GameVo $game, int $delay = 0): void
@@ -261,6 +366,13 @@ LUA;
                 'game_key' => $game->gameKey,
                 'hero_uid' => $hero->uid,
                 'provider' => $this->pokerManager->getDefaultProvider(),
+                'game_type' => $game->gameType,
+                'squid_mode' => $game->gameType === 'SQUID' ? $game->squidMode : null,
+                'squid_cost' => $game->gameType === 'SQUID' ? $game->squidCost : null,
+                'squid_number' => $game->gameType === 'SQUID' ? $game->squidNumber : null,
+                'squid_round' => $game->gameType === 'SQUID' ? $game->squidRound : null,
+                'squid_played' => $game->gameType === 'SQUID' ? $game->squidPlayed : null,
+                'squid_players' => $game->gameType === 'SQUID' ? $game->squidPlayers : null,
                 'players' => $game->players->count(),
                 'status' => $game->status->name,
                 'big_blind' => $game->bigBlind,

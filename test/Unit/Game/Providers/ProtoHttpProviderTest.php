@@ -784,6 +784,46 @@ final class ProtoHttpProviderTest extends TestCase
         ], $events);
     }
 
+    public function test_squid_hand_maps_awards_and_final_settlement_to_proto(): void
+    {
+        $game = new GameVo(1, '12345678-90ab-4cde-8f01-23456789abcd', NetworkEnum::OK, 'room#101', 6, 3, 0, [
+            ['uid' => 'hero', 'seat' => 1, 'stack' => 100, 'hero' => true],
+            ['uid' => 'villain', 'seat' => 2, 'stack' => 100, 'hero' => false],
+        ], 1, 'client-a', gameType: 'SQUID', squidMode: 'HUNT', squidCost: 24, squidNumber: 8,
+            squidRound: 1, squidPlayed: 2, squidPlayers: ['hero' => 2, 'villain' => 0]);
+        $game->event(GameEventTypeEnum::GOT_SQUID, ['uid' => 'hero', 'count' => 2], 1);
+        $game->event(GameEventTypeEnum::OVER, [
+            'winners' => [['uid' => 'hero', 'amount' => 20]],
+            'squid' => [
+                ['type' => 'penaly', 'uid' => 'villain', 'amount' => 48],
+                ['type' => 'payout', 'uid' => 'hero', 'amount' => 48],
+            ],
+        ], 2);
+
+        $provider = new ProtoHttpProvider(['network' => 'OK']);
+        $message = $provider->gameEvents($game, true);
+
+        self::assertSame('NLSQ', $message['game']['gameType']);
+        self::assertSame('HUNT', $message['game']['squidMode']);
+        self::assertSame(24, $message['game']['squidCost']);
+        self::assertSame(8, $message['game']['squidNumber']);
+        self::assertSame(4, $message['game']['squidPlayed']);
+        self::assertContains(['eventType' => 'playerHasSquid', 'name' => 'hero', 'count' => 2], $message['events']);
+        self::assertSame([
+            ['eventType' => 'playerGotSquid', 'name' => 'hero'],
+            ['eventType' => 'playerGotSquid', 'name' => 'hero'],
+            ['eventType' => 'squidPenalty', 'name' => 'villain', 'amount' => 48],
+            ['eventType' => 'squidPayment', 'name' => 'hero', 'amount' => 48],
+        ], array_values(array_filter($message['events'], static fn (array $event): bool => in_array($event['eventType'], [
+            'playerGotSquid', 'squidPenalty', 'squidPayment',
+        ], true))));
+        self::assertSame('gameOver', $message['events'][count($message['events']) - 1]['eventType']);
+        $liveMessage = $provider->gameEvents($game);
+        self::assertSame(2, $liveMessage['game']['squidPlayed']);
+        self::assertNotContains('playerGotSquid', array_column($liveMessage['events'], 'eventType'));
+        self::assertNotContains('squidPenalty', array_column($liveMessage['events'], 'eventType'));
+    }
+
     public function test_ok_heads_up_posts_both_calculated_blinds(): void
     {
         $game = new GameVo(1, '12345678-90ab-4cde-8f01-23456789abcf', NetworkEnum::OK, '6724521#45', 2, 1, 0, [

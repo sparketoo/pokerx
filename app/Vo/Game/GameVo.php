@@ -48,6 +48,7 @@ class GameVo extends Vo
 
     /**
      * @param  list<array{uid:string,name?:string,seat:int,stack:int,hero:bool}>  $players
+     * @param  array<string, int>  $squidPlayers
      */
     public function __construct(
         public readonly int $userId,
@@ -60,7 +61,28 @@ class GameVo extends Vo
         array $players,
         public readonly int $buttonSeatNumber,
         public readonly string $clientId,
+        public readonly string $gameType = 'NL',
+        public readonly string $squidMode = 'STAND_UP',
+        public readonly int $squidCost = 0,
+        public readonly int $squidNumber = 0,
+        public readonly int $squidRound = 0,
+        public readonly int $squidPlayed = 0,
+        public readonly array $squidPlayers = [],
     ) {
+
+        if (! in_array($this->gameType, ['NL', 'SQUID'], true)
+            || ! in_array($this->squidMode, ['STAND_UP', 'HUNT'], true)
+            || ($this->gameType === 'SQUID' && ($this->squidCost <= 0 || $this->squidNumber <= 0
+                || $this->squidRound <= 0 || $this->squidPlayed < 0 || $this->squidPlayed > $this->squidNumber))
+            || ($this->gameType === 'NL' && ($this->squidCost !== 0 || $this->squidNumber !== 0
+                || $this->squidRound !== 0 || $this->squidPlayed !== 0 || $this->squidPlayers !== []))) {
+            throw new GameException(__('messages.game.event_invalid'), ErrorCode::EVENT_INVALID);
+        }
+        foreach ($this->squidPlayers as $count) {
+            if ($count < 0) {
+                throw new GameException(__('messages.game.event_invalid'), ErrorCode::EVENT_INVALID);
+            }
+        }
 
         if (count($players) < 2) {
             throw new GameException(__('messages.game.players_less_than_two'));
@@ -211,6 +233,24 @@ class GameVo extends Vo
             }
             $player->blind += $amount;
         }
+        if ($type->isGotSquid()) {
+            $count = $payload['count'] ?? null;
+            $player = $this->playerOrFail(is_string($uid) ? $uid : '');
+            if ($this->gameType !== 'SQUID' || ! is_int($count) || $count < 1
+                || $this->squidPlayed + $count > $this->squidNumber
+                || ($this->squidMode === 'STAND_UP' && ($count !== 1 || ($this->squidPlayers[$player->uid] ?? 0) > 0))) {
+                throw new GameException(__('messages.game.event_invalid'), ErrorCode::EVENT_INVALID);
+            }
+            foreach ($this->events as $existing) {
+                if (! $existing->type->isGotSquid()) {
+                    continue;
+                }
+                if ($existing->payload === $payload) {
+                    return $existing;
+                }
+                throw new GameException(__('messages.game.event_invalid'), ErrorCode::EVENT_INVALID);
+            }
+        }
         if ($type->isOver()) {
             if (array_key_exists('insurance_payout', $payload)
                 && (! is_int($payload['insurance_payout']) || $payload['insurance_payout'] < 0
@@ -234,6 +274,22 @@ class GameVo extends Vo
                 $winner['uid'] = $this->playerOrFail($winner['uid'])->uid;
             }
             unset($winner);
+            if (! empty($payload['squid']) && $this->gameType !== 'SQUID') {
+                throw new GameException(__('messages.game.event_invalid'), ErrorCode::EVENT_INVALID);
+            }
+            if (isset($payload['squid'])) {
+                foreach ($payload['squid'] as &$settlement) {
+                    $settlementUid = $settlement['uid'] ?? null;
+                    if (! is_string($settlementUid) || ! preg_match('/\A[A-Za-z0-9]{1,16}\z/D', $settlementUid)
+                        || ! in_array($settlement['type'] ?? null, ['penaly', 'payout'], true)
+                        || ! is_int($settlement['amount'] ?? null) || $settlement['amount'] <= 0) {
+                        throw new GameException(__('messages.game.event_invalid'), ErrorCode::EVENT_INVALID);
+                    }
+                    // 退出牌桌的玩家仍可能参与本轮鱿鱼结算。
+                    $settlement['uid'] = $this->player($settlementUid)->uid ?? strtolower($settlementUid);
+                }
+                unset($settlement);
+            }
             if (isset($payload['shown'])) {
                 foreach ($payload['shown'] as &$shown) {
                     $shown['uid'] = $this->playerOrFail($shown['uid'])->uid;

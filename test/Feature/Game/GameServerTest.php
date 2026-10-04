@@ -282,7 +282,71 @@ final class GameServerTest extends DatabaseTestCase
         self::assertSame(2, $provider->posted->game->pot());
     }
 
-    public function test_start_accepts_player_names_up_to_32_characters(): void
+    public function test_squid_start_award_and_over_use_the_client_contract(): void
+    {
+        $provider = new class extends BaseProvider
+        {
+            public ?GameVo $started = null;
+
+            public ?GameEventVo $overEvent = null;
+
+            public function start(GameVo $game): void
+            {
+                $this->started = $game;
+            }
+
+            public function over(GameEventVo $event): void
+            {
+                $this->overEvent = $event;
+            }
+
+            public function requestAction(GameVo $game, Closure $callback): void {}
+        };
+        $sender = new FakeGameServerSender;
+        $user = $this->user();
+        $connection = new GameServerConnectionVo(11, $user, 'client-a', (new GameProviderManager)->getDefaultProvider());
+        $server = $this->gameServerWithConnections($provider, [11 => $connection], $sender);
+        $server->handleStart(new GameServerMessageVo($connection, 'start-squid', 'START', [
+            'game_key' => 'squid-'.bin2hex(random_bytes(4)).'#1', 'network' => 'OK', 'ante' => 0,
+            'small_blind' => 3, 'big_blind' => 6, 'button_seat_number' => 1,
+            'gameType' => 'SQUID', 'squidMode' => 'HUNT', 'squidCost' => 24,
+            'squidNumber' => 8, 'squidRound' => 1, 'squidPlayed' => 2,
+            'players' => [
+                ['uid' => 'hero', 'seat' => 1, 'stack' => 100, 'hero' => true, 'squidNumber' => 2],
+                ['uid' => 'villain', 'seat' => 2, 'stack' => 100, 'hero' => false, 'squidNumber' => 0],
+            ],
+        ], time() * 1000));
+
+        self::assertNotNull($provider->started);
+        self::assertSame('SQUID', $provider->started->gameType);
+        self::assertSame('HUNT', $provider->started->squidMode);
+        self::assertSame(24, $provider->started->squidCost);
+        self::assertSame(8, $provider->started->squidNumber);
+        self::assertSame(2, $provider->started->squidPlayed);
+        self::assertSame(2, $provider->started->squidPlayers['hero']);
+        $uuid = $provider->started->uuid;
+
+        $server->handleGotSquid(new GameServerMessageVo($connection, 'award-squid', 'GOT_SQUID', [
+            'game_uuid' => $uuid, 'uid' => 'hero', 'count' => 2,
+        ], time() * 1000));
+        $server->handleOver(new GameServerMessageVo($connection, 'over-squid', 'OVER', [
+            'game_uuid' => $uuid, 'winners' => [['uid' => 'hero', 'amount' => 20]],
+            'squid' => [
+                ['type' => 'penaly', 'uid' => 'villain', 'amount' => 48],
+                ['type' => 'payout', 'uid' => 'hero', 'amount' => 48],
+            ],
+        ], time() * 1000));
+
+        self::assertSame(['START.ACK', 'GOT_SQUID.ACK', 'OVER.ACK'], array_column($sender->messages, 'type'));
+        self::assertNotNull($provider->overEvent);
+        self::assertSame(['GOT_SQUID', 'OVER'], array_map(
+            static fn (GameEventVo $event): string => $event->type->name,
+            $provider->overEvent->game->events->all(),
+        ));
+        self::assertSame('penaly', $provider->overEvent->payload['squid'][0]['type']);
+    }
+
+    public function test_start_accepts_player_names_up_to_128_characters(): void
     {
         $provider = new class extends BaseProvider
         {
@@ -312,22 +376,22 @@ final class GameServerTest extends DatabaseTestCase
             'game_key' => 'name-'.bin2hex(random_bytes(8)), 'network' => 'OK', 'ante' => 0,
             'small_blind' => 1, 'big_blind' => 2, 'button_seat_number' => 1,
             'players' => [
-                ['uid' => 'hero', 'name' => str_repeat('玩', 32), 'seat' => 1, 'stack' => 100, 'hero' => true],
+                ['uid' => 'hero', 'name' => str_repeat('玩', 128), 'seat' => 1, 'stack' => 100, 'hero' => true],
                 ['uid' => 'villain', 'name' => 'Opponent', 'seat' => 2, 'stack' => 100, 'hero' => false],
             ],
         ];
 
-        $server->handleStart(new GameServerMessageVo($connection, 'start-name-32', 'START', $payload, time() * 1000));
+        $server->handleStart(new GameServerMessageVo($connection, 'start-name-128', 'START', $payload, time() * 1000));
 
         self::assertNotNull($provider->started);
         $player = $provider->started->players->first();
         self::assertNotNull($player);
-        self::assertSame(str_repeat('玩', 32), $player->name);
+        self::assertSame(str_repeat('玩', 128), $player->name);
 
-        $payload['players'][0]['name'] = str_repeat('玩', 33);
+        $payload['players'][0]['name'] = str_repeat('玩', 129);
         try {
-            $server->handleStart(new GameServerMessageVo($connection, 'start-name-33', 'START', $payload, time() * 1000));
-            self::fail('Player names longer than 32 characters must be rejected');
+            $server->handleStart(new GameServerMessageVo($connection, 'start-name-129', 'START', $payload, time() * 1000));
+            self::fail('Player names longer than 128 characters must be rejected');
         } catch (ValidationException) {
             self::assertNotNull($provider->started);
         }

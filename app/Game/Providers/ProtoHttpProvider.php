@@ -477,6 +477,18 @@ final class ProtoHttpProvider extends BaseProvider
                 'stack' => $player->stack,
             ];
         }
+        if ($game->gameType === 'SQUID') {
+            foreach ($game->players as $player) {
+                $count = $game->squidPlayers[$player->uid] ?? 0;
+                if ($count > 0) {
+                    $events[] = [
+                        'eventType' => 'playerHasSquid',
+                        'name' => $player->uid,
+                        'count' => $count,
+                    ];
+                }
+            }
+        }
         foreach ($game->players as $player) {
             if ($player->ante > 0) {
                 $events[] = [
@@ -567,6 +579,19 @@ final class ProtoHttpProvider extends BaseProvider
                     ];
                 }
             }
+            if ($game->gameType === 'SQUID') {
+                foreach ($handEvents as $event) {
+                    if (! $event->type->isGotSquid()) {
+                        continue;
+                    }
+                    for ($count = 0; $count < $event->payload['count']; $count++) {
+                        $events[] = [
+                            'eventType' => 'playerGotSquid',
+                            'name' => $event->payload['uid'],
+                        ];
+                    }
+                }
+            }
             foreach ($game->players as $player) {
                 if ($player->cards) {
                     $events[] = [
@@ -581,24 +606,55 @@ final class ProtoHttpProvider extends BaseProvider
                     ];
                 }
             }
+            if ($game->gameType === 'SQUID') {
+                // 只透传 OK 在整轮结束时给出的收支，不按本手底池或已获鱿鱼推算。
+                foreach ($handEvents as $event) {
+                    if (! $event->type->isOver()) {
+                        continue;
+                    }
+                    foreach ($event->payload['squid'] ?? [] as $settlement) {
+                        $events[] = [
+                            'eventType' => $settlement['type'] === 'penaly' ? 'squidPenalty' : 'squidPayment',
+                            'name' => $settlement['uid'],
+                            'amount' => $settlement['amount'],
+                        ];
+                    }
+                }
+            }
             $events[] = [
                 'eventType' => 'gameOver',
             ];
         }
 
+        $gameDetails = [
+            'gameId' => $game->uuid,
+            'pokerNetwork' => $this->options['network'] ?? 'WE',
+            'gameType' => $game->gameType === 'SQUID' ? 'NLSQ' : 'NL',
+            'bigBlind' => $game->bigBlind,
+            'ante' => $game->ante,
+            'currency' => $this->options['currency'] ?? 'USDT',
+            'gameDate' => (string) $game->createdAtMs,
+            'numPlayers' => count($game->players),
+            'buttonSetToSeat' => $game->buttonSeatNumber,
+        ];
+        if ($game->gameType === 'SQUID') {
+            $gameDetails['squidMode'] = $game->squidMode;
+            $gameDetails['squidCost'] = $game->squidCost;
+            $gameDetails['squidNumber'] = $game->squidNumber;
+            $wonThisHand = 0;
+            if ($over) {
+                foreach ($handEvents as $event) {
+                    if ($event->type->isGotSquid()) {
+                        $wonThisHand += $event->payload['count'];
+                    }
+                }
+            }
+            $gameDetails['squidPlayed'] = $game->squidPlayed + $wonThisHand;
+        }
+
         return [
             'structType' => $over ? 'fullGameLog' : 'gameEvents',
-            'game' => [
-                'gameId' => $game->uuid,
-                'pokerNetwork' => $this->options['network'] ?? 'WE',
-                'gameType' => 'NL',
-                'bigBlind' => $game->bigBlind,
-                'ante' => $game->ante,
-                'currency' => $this->options['currency'] ?? 'USDT',
-                'gameDate' => (string) $game->createdAtMs,
-                'numPlayers' => count($game->players),
-                'buttonSetToSeat' => $game->buttonSeatNumber,
-            ],
+            'game' => $gameDetails,
             'events' => $events,
         ];
     }

@@ -61,6 +61,57 @@ final class GameVoTest extends TestCase
         self::assertCount(3, $game->events);
     }
 
+    public function test_squid_award_and_round_settlement_are_recorded_in_the_hand(): void
+    {
+        $game = new GameVo(1, '11111111-1111-4111-8111-000000000101', NetworkEnum::OK, 'room#101', 6, 3, 0, [
+            ['uid' => 'hero', 'seat' => 1, 'stack' => 100, 'hero' => true],
+            ['uid' => 'villain', 'seat' => 2, 'stack' => 100, 'hero' => false],
+        ], 1, 'client-a', gameType: 'SQUID', squidMode: 'HUNT', squidCost: 24, squidNumber: 8, squidRound: 1);
+
+        $award = $game->event(GameEventTypeEnum::GOT_SQUID, ['uid' => 'HERO', 'count' => 2], 1);
+        $over = $game->event(GameEventTypeEnum::OVER, [
+            'winners' => [['uid' => 'hero', 'amount' => 20]],
+            'squid' => [
+                ['type' => 'penaly', 'uid' => 'VILLAIN', 'amount' => 48],
+                ['type' => 'payout', 'uid' => 'HERO', 'amount' => 48],
+            ],
+        ], 2);
+
+        self::assertSame('hero', $award->payload['uid']);
+        self::assertSame(2, $award->payload['count']);
+        self::assertSame('villain', $over->payload['squid'][0]['uid']);
+        self::assertSame('hero', $over->payload['squid'][1]['uid']);
+        self::assertSame(GameStatusEnum::OVER, $game->status);
+    }
+
+    public function test_squid_settlement_can_include_a_player_who_left_before_the_final_hand(): void
+    {
+        $game = new GameVo(1, '11111111-1111-4111-8111-000000000103', NetworkEnum::OK, 'room#103', 6, 3, 0, [
+            ['uid' => 'hero', 'seat' => 1, 'stack' => 100, 'hero' => true],
+            ['uid' => 'villain', 'seat' => 2, 'stack' => 100, 'hero' => false],
+        ], 1, 'client-a', gameType: 'SQUID', squidMode: 'HUNT', squidCost: 24, squidNumber: 8,
+            squidRound: 1, squidPlayed: 8, squidPlayers: ['hero' => 3, 'villain' => 1]);
+
+        $over = $game->event(GameEventTypeEnum::OVER, [
+            'winners' => [['uid' => 'hero', 'amount' => 20]],
+            'squid' => [['type' => 'penaly', 'uid' => 'LEFTPLAYER', 'amount' => 192]],
+        ], 1);
+
+        self::assertSame('leftplayer', $over->payload['squid'][0]['uid']);
+    }
+
+    public function test_squid_award_cannot_exceed_the_remaining_number(): void
+    {
+        $game = new GameVo(1, '11111111-1111-4111-8111-000000000104', NetworkEnum::OK, 'room#104', 6, 3, 0, [
+            ['uid' => 'hero', 'seat' => 1, 'stack' => 100, 'hero' => true],
+            ['uid' => 'villain', 'seat' => 2, 'stack' => 100, 'hero' => false],
+        ], 1, 'client-a', gameType: 'SQUID', squidMode: 'HUNT', squidCost: 24, squidNumber: 8,
+            squidRound: 1, squidPlayed: 7, squidPlayers: ['hero' => 3, 'villain' => 4]);
+
+        $this->expectException(GameException::class);
+        $game->event(GameEventTypeEnum::GOT_SQUID, ['uid' => 'hero', 'count' => 2], 1);
+    }
+
     public function test_insurance_rejects_conflicting_purchase(): void
     {
         $game = GameVoFixture::headsUp();
