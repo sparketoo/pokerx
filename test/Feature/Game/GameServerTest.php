@@ -9,6 +9,9 @@ use App\Enum\NetworkEnum;
 use App\Game\GameProviderManager;
 use App\Game\GameServer;
 use App\Game\Providers\BaseProvider;
+use App\Game\Providers\IdelProvider;
+use App\Game\Providers\ProtoHttpProvider;
+use App\Game\Providers\ProtoProvider;
 use App\Game\Providers\ProviderInterface;
 use App\Model\User;
 use App\Service\GameService;
@@ -23,8 +26,12 @@ use Closure;
 use Hyperf\AsyncQueue\Driver\DriverFactory;
 use Hyperf\Cache\Cache;
 use Hyperf\Context\ApplicationContext;
+use Hyperf\Contract\ConfigInterface;
 use Hyperf\Database\ConnectionResolverInterface;
 use Hyperf\Di\Container;
+use Hyperf\Engine\Contract\Http\ClientInterface;
+use Hyperf\Engine\Contract\Http\RawResponseInterface;
+use Hyperf\Engine\Http\RawResponse;
 use Hyperf\Redis\Redis;
 use Hyperf\Validation\Contract\ValidatorFactoryInterface;
 use Hyperf\Validation\ValidationException;
@@ -33,10 +40,13 @@ use Illuminate\Encryption\Encrypter;
 use Psr\Log\LoggerInterface;
 use ReflectionProperty;
 use RuntimeException;
+use Swoole\Coroutine;
 use Swoole\Http\Request as SwooleRequest;
 use Swoole\WebSocket\Frame;
 use Tests\Fixtures\FakeGameServerSender;
+use Tests\Fixtures\FakeProtoHttpRedis;
 use Tests\Fixtures\GameVoFixture;
+use Tests\Fixtures\ProtoHttpLoopbackClient;
 use Tests\Support\DatabaseTestCase;
 use Throwable;
 
@@ -312,8 +322,8 @@ final class GameServerTest extends DatabaseTestCase
             'gameType' => 'SQUID', 'squidMode' => 'HUNT', 'squidCost' => 24,
             'squidNumber' => 8, 'squidRound' => 1, 'squidPlayed' => 2,
             'players' => [
-                ['uid' => 'hero', 'seat' => 1, 'stack' => 100, 'hero' => true, 'squidNumber' => 2],
-                ['uid' => 'villain', 'seat' => 2, 'stack' => 100, 'hero' => false, 'squidNumber' => 0],
+                ['uid' => 'hero', 'seat' => 1, 'stack' => 100, 'hero' => true],
+                ['uid' => 'villain', 'seat' => 2, 'stack' => 100, 'hero' => false],
             ],
         ], time() * 1000));
 
@@ -323,8 +333,15 @@ final class GameServerTest extends DatabaseTestCase
         self::assertSame(24, $provider->started->squidCost);
         self::assertSame(8, $provider->started->squidNumber);
         self::assertSame(2, $provider->started->squidPlayed);
-        self::assertSame(2, $provider->started->squidPlayers['hero']);
+        self::assertSame([], $provider->started->squidPlayers);
         $uuid = $provider->started->uuid;
+
+        $server->handlePlayerHasSquid(new GameServerMessageVo($connection, 'has-squid-hero', 'PLAYER_HAS_SQUID', [
+            'game_uuid' => $uuid, 'uid' => 'hero', 'count' => 2,
+        ], time() * 1000));
+        $server->handlePlayerHasSquid(new GameServerMessageVo($connection, 'has-squid-villain', 'PLAYER_HAS_SQUID', [
+            'game_uuid' => $uuid, 'uid' => 'villain', 'count' => 0,
+        ], time() * 1000));
 
         $server->handleGotSquid(new GameServerMessageVo($connection, 'award-squid', 'GOT_SQUID', [
             'game_uuid' => $uuid, 'uid' => 'hero', 'count' => 2,
@@ -337,13 +354,224 @@ final class GameServerTest extends DatabaseTestCase
             ],
         ], time() * 1000));
 
-        self::assertSame(['START.ACK', 'GOT_SQUID.ACK', 'OVER.ACK'], array_column($sender->messages, 'type'));
+        self::assertSame(['START.ACK', 'PLAYER_HAS_SQUID.ACK', 'PLAYER_HAS_SQUID.ACK', 'GOT_SQUID.ACK', 'OVER.ACK'], array_column($sender->messages, 'type'));
         self::assertNotNull($provider->overEvent);
-        self::assertSame(['GOT_SQUID', 'OVER'], array_map(
+        self::assertSame(['PLAYER_HAS_SQUID', 'PLAYER_HAS_SQUID', 'GOT_SQUID', 'OVER'], array_map(
             static fn (GameEventVo $event): string => $event->type->name,
             $provider->overEvent->game->events->all(),
         ));
         self::assertSame('penaly', $provider->overEvent->payload['squid'][0]['type']);
+    }
+
+    public function test_wpk_classic_round_from_captured_hand_events_reaches_proto_http(): void
+    {
+        $fixtureJson = file_get_contents(__DIR__.'/../../Fixtures/wpk_classic_round_10_replay.json');
+        if ($fixtureJson === false) {
+            throw new RuntimeException('Could not read the WPK classic replay fixture.');
+        }
+        $fixture = json_decode($fixtureJson, true, 512, JSON_THROW_ON_ERROR);
+        $commands = $this->replayWpkSquidHands(array_values($fixture['hands']));
+        $partial = array_values(array_filter($commands, static fn (array $command): bool => $command['structType'] === 'gameEvents'));
+        $complete = array_values(array_filter($commands, static fn (array $command): bool => $command['structType'] === 'fullGameLog'));
+
+        self::assertCount(5, $partial);
+        self::assertCount(4, $complete, 'The captured first hand has no terminal event and must remain open.');
+        self::assertSame([0, 1, 1, 1, 2], array_map(static fn (array $command): int => $command['game']['squidPlayed'], $partial));
+        self::assertSame([1, 1, 2, 3], array_map(static fn (array $command): int => $command['game']['squidPlayed'], $complete));
+        foreach ($complete as $index => $command) {
+            self::assertSame('NLSQ', $command['game']['gameType']);
+            self::assertSame('STAND_UP', $command['game']['squidMode']);
+            self::assertSame([1, 1, 1, 2][$index], count(array_filter($command['events'],
+                static fn (array $event): bool => $event['eventType'] === 'playerHasSquid')));
+            self::assertSame('gameOver', $command['events'][array_key_last($command['events'])]['eventType']);
+        }
+        $last = end($complete);
+        self::assertIsArray($last);
+        $last = $last['events'];
+        self::assertSame(1, count(array_filter($last, static fn (array $event): bool => $event['eventType'] === 'playerGotSquid')));
+        self::assertSame(1, count(array_filter($last, static fn (array $event): bool => $event['eventType'] === 'squidPenalty')));
+        self::assertSame(3, count(array_filter($last, static fn (array $event): bool => $event['eventType'] === 'squidPayment')));
+        self::assertSame(900, array_values(array_filter($last, static fn (array $event): bool => $event['eventType'] === 'squidPenalty'))[0]['amount']);
+    }
+
+    public function test_wpk_blood_round_reaches_proto_http_with_multiple_squid_awards(): void
+    {
+        // HAR confirms HUNT mode and a 2+1 fish distribution; native frame order is not present.
+        $commands = $this->replayWpkSquidHands($this->wpkHuntRoundHands('blood', 'p2', [
+            ['uid' => 'p1', 'type' => 'payout', 'amount' => 1200],
+            ['uid' => 'p2', 'type' => 'payout', 'amount' => 600],
+            ['uid' => 'p3', 'type' => 'penaly', 'amount' => 900],
+            ['uid' => 'p4', 'type' => 'penaly', 'amount' => 900],
+        ]));
+        $complete = array_values(array_filter($commands, static fn (array $command): bool => $command['structType'] === 'fullGameLog'));
+
+        self::assertCount(2, $complete);
+        self::assertSame([2, 3], array_map(static fn (array $command): int => $command['game']['squidPlayed'], $complete));
+        self::assertSame([2, 1], array_map(static fn (array $command): int => count(array_filter($command['events'],
+            static fn (array $event): bool => $event['eventType'] === 'playerGotSquid')), $complete));
+        self::assertSame('HUNT', $complete[1]['game']['squidMode']);
+        self::assertSame([1200, 600], array_column(array_values(array_filter($complete[1]['events'],
+            static fn (array $event): bool => $event['eventType'] === 'squidPayment')), 'amount'));
+        self::assertSame([900, 900], array_column(array_values(array_filter($complete[1]['events'],
+            static fn (array $event): bool => $event['eventType'] === 'squidPenalty')), 'amount'));
+    }
+
+    public function test_wpk_doubling_round_forwards_platform_settlement_without_repricing(): void
+    {
+        // WPK's 3-fish multiplier is not in the shared protocol; the platform's signed settlement is authoritative.
+        $commands = $this->replayWpkSquidHands($this->wpkHuntRoundHands('doubling', 'p1', [
+            ['uid' => 'p1', 'type' => 'payout', 'amount' => 5400],
+            ['uid' => 'p2', 'type' => 'penaly', 'amount' => 1800],
+            ['uid' => 'p3', 'type' => 'penaly', 'amount' => 1800],
+            ['uid' => 'p4', 'type' => 'penaly', 'amount' => 1800],
+        ]), requestAction: false);
+        $complete = array_values(array_filter($commands, static fn (array $command): bool => $command['structType'] === 'fullGameLog'));
+
+        self::assertCount(2, $complete);
+        self::assertCount(2, $commands, 'WPK disables automatic action advice for multiplier rooms.');
+        self::assertSame([2, 3], array_map(static fn (array $command): int => $command['game']['squidPlayed'], $complete));
+        self::assertSame('HUNT', $complete[1]['game']['squidMode']);
+        self::assertSame(300, $complete[1]['game']['squidCost']);
+        self::assertSame(5400, array_values(array_filter($complete[1]['events'],
+            static fn (array $event): bool => $event['eventType'] === 'squidPayment'))[0]['amount']);
+        self::assertSame([1800, 1800, 1800], array_column(array_values(array_filter($complete[1]['events'],
+            static fn (array $event): bool => $event['eventType'] === 'squidPenalty')), 'amount'));
+    }
+
+    public function test_wpk_three_rounds_through_local_proto_http_peer(): void
+    {
+        $url = getenv('WPK_PROTO_REPLAY_URL');
+        $capture = getenv('WPK_PROTO_REPLAY_CAPTURE');
+        if (! is_string($url) || $url === '' || ! is_string($capture) || $capture === '') {
+            self::markTestSkipped('Start the local Proto HTTP peer and set WPK_PROTO_REPLAY_URL and WPK_PROTO_REPLAY_CAPTURE.');
+        }
+        $fixtureJson = file_get_contents(__DIR__.'/../../Fixtures/wpk_classic_round_10_replay.json');
+        if ($fixtureJson === false) {
+            throw new RuntimeException('Could not read the WPK classic replay fixture.');
+        }
+        $fixture = json_decode($fixtureJson, true, 512, JSON_THROW_ON_ERROR);
+        $this->replayWpkSquidHands(array_values($fixture['hands']), httpUrl: $url);
+        $this->replayWpkSquidHands($this->wpkHuntRoundHands('blood', 'p2', [
+            ['uid' => 'p1', 'type' => 'payout', 'amount' => 1200],
+            ['uid' => 'p2', 'type' => 'payout', 'amount' => 600],
+            ['uid' => 'p3', 'type' => 'penaly', 'amount' => 900],
+            ['uid' => 'p4', 'type' => 'penaly', 'amount' => 900],
+        ]), httpUrl: $url);
+        $this->replayWpkSquidHands($this->wpkHuntRoundHands('doubling', 'p1', [
+            ['uid' => 'p1', 'type' => 'payout', 'amount' => 5400],
+            ['uid' => 'p2', 'type' => 'penaly', 'amount' => 1800],
+            ['uid' => 'p3', 'type' => 'penaly', 'amount' => 1800],
+            ['uid' => 'p4', 'type' => 'penaly', 'amount' => 1800],
+        ]), requestAction: false, httpUrl: $url);
+
+        $lines = file($capture, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+        if ($lines === false) {
+            throw new RuntimeException('Could not read the Proto HTTP replay capture.');
+        }
+        $records = array_map(static fn (string $line): array => json_decode($line, true, 512, JSON_THROW_ON_ERROR), $lines);
+        $commands = array_values(array_filter(array_column($records, 'payload')));
+        self::assertCount(8, array_filter($commands, static fn (array $command): bool => $command['structType'] === 'fullGameLog'));
+        self::assertCount(7, array_filter($commands, static fn (array $command): bool => $command['structType'] === 'gameEvents'));
+        self::assertCount(7, array_filter($commands, static fn (array $command): bool => $command['structType'] === 'getAnswer'));
+        self::assertSame([3, 3, 3], array_values(array_map(static fn (array $command): int => $command['game']['squidPlayed'],
+            array_filter($commands, static fn (array $command): bool => $command['structType'] === 'fullGameLog'
+                && $command['game']['squidPlayed'] === 3))));
+    }
+
+    public function test_wpk_three_rounds_through_game_server_and_proto_websocket_peer(): void
+    {
+        $url = getenv('WPK_PROTO_WS_REPLAY_URL');
+        $capture = getenv('WPK_PROTO_WS_REPLAY_CAPTURE');
+        if (! is_string($url) || $url === '' || ! is_string($capture) || $capture === '') {
+            self::markTestSkipped('Start the local Proto WebSocket peer and set WPK_PROTO_WS_REPLAY_URL and WPK_PROTO_WS_REPLAY_CAPTURE.');
+        }
+
+        Coroutine\run(function () use ($url): void {
+            // 临时表属于数据库连接；协程会使用独立连接，必须在协程内建立测试表。
+            $this->createTemporaryTables();
+            try {
+                $provider = new ProtoProvider([
+                    'url' => $url, 'token' => 'wpk-replay-token', 'player_id' => 'wpk-replay',
+                    'network' => 'WE', 'request_timeout' => 2, 'delay' => 0,
+                ], ApplicationContext::getContainer()->get(Redis::class));
+                $fixtureJson = file_get_contents(__DIR__.'/../../Fixtures/wpk_classic_round_10_replay.json');
+                if ($fixtureJson === false) {
+                    throw new RuntimeException('Could not read the WPK classic replay fixture.');
+                }
+                $fixture = json_decode($fixtureJson, true, 512, JSON_THROW_ON_ERROR);
+                $this->replayWpkSquidHands(array_values($fixture['hands']), selectedProvider: $provider);
+                $this->replayWpkSquidHands($this->wpkHuntRoundHands('blood', 'p2', [
+                    ['uid' => 'p1', 'type' => 'payout', 'amount' => 1200],
+                    ['uid' => 'p2', 'type' => 'payout', 'amount' => 600],
+                    ['uid' => 'p3', 'type' => 'penaly', 'amount' => 900],
+                    ['uid' => 'p4', 'type' => 'penaly', 'amount' => 900],
+                ]), selectedProvider: $provider);
+                $this->replayWpkSquidHands($this->wpkHuntRoundHands('doubling', 'p1', [
+                    ['uid' => 'p1', 'type' => 'payout', 'amount' => 5400],
+                    ['uid' => 'p2', 'type' => 'penaly', 'amount' => 1800],
+                    ['uid' => 'p3', 'type' => 'penaly', 'amount' => 1800],
+                    ['uid' => 'p4', 'type' => 'penaly', 'amount' => 1800],
+                ]), requestAction: false, selectedProvider: $provider);
+            } finally {
+                $this->dropTemporaryTables();
+            }
+        });
+
+        $lines = file($capture, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+        if ($lines === false) {
+            throw new RuntimeException('Could not read the Proto WebSocket replay capture.');
+        }
+        $commands = array_map(static fn (string $line): array => json_decode($line, true, 512, JSON_THROW_ON_ERROR), $lines);
+        self::assertCount(8, array_filter($commands, static fn (array $command): bool => ($command['structType'] ?? null) === 'fullGameLog'));
+        self::assertCount(7, array_filter($commands, static fn (array $command): bool => ($command['structType'] ?? null) === 'gameEvents'));
+        self::assertCount(7, array_filter($commands, static fn (array $command): bool => ($command['structType'] ?? null) === 'getAnswer'));
+        foreach ($commands as $command) {
+            foreach ($command['events'] ?? [] as $event) {
+                if (($event['eventType'] ?? null) === 'playerHasSquid') {
+                    self::assertGreaterThan(0, $event['count']);
+                }
+            }
+        }
+    }
+
+    public function test_wpk_classic_and_blood_decisions_through_configured_proto_websocket(): void
+    {
+        if (getenv('WPK_PROTO_WS_REAL') !== '1') {
+            self::markTestSkipped('Set WPK_PROTO_WS_REAL=1 to exercise the configured Proto WebSocket service.');
+        }
+        $options = ApplicationContext::getContainer()->get(ConfigInterface::class)->get('poker.proto');
+        self::assertIsArray($options);
+        self::assertNotEmpty($options['url'] ?? null);
+        self::assertNotEmpty($options['token'] ?? null);
+
+        Coroutine\run(function () use ($options): void {
+            $this->createTemporaryTables();
+            try {
+                $provider = new ProtoProvider([
+                    ...$options, 'request_timeout' => 20, 'delay' => 0,
+                ], ApplicationContext::getContainer()->get(Redis::class));
+                $fixtureJson = file_get_contents(__DIR__.'/../../Fixtures/wpk_classic_round_10_replay.json');
+                if ($fixtureJson === false) {
+                    throw new RuntimeException('Could not read the WPK classic replay fixture.');
+                }
+                $fixture = json_decode($fixtureJson, true, 512, JSON_THROW_ON_ERROR);
+                $this->replayWpkSquidHands(array_slice(array_values($fixture['hands']), 1), selectedProvider: $provider);
+                $this->replayWpkSquidHands($this->wpkHuntRoundHands('blood', 'p2', [
+                    ['uid' => 'p1', 'type' => 'payout', 'amount' => 1200],
+                    ['uid' => 'p2', 'type' => 'payout', 'amount' => 600],
+                    ['uid' => 'p3', 'type' => 'penaly', 'amount' => 900],
+                    ['uid' => 'p4', 'type' => 'penaly', 'amount' => 900],
+                ]), selectedProvider: $provider);
+                $this->replayWpkSquidHands($this->wpkHuntRoundHands('doubling', 'p1', [
+                    ['uid' => 'p1', 'type' => 'payout', 'amount' => 5400],
+                    ['uid' => 'p2', 'type' => 'penaly', 'amount' => 1800],
+                    ['uid' => 'p3', 'type' => 'penaly', 'amount' => 1800],
+                    ['uid' => 'p4', 'type' => 'penaly', 'amount' => 1800],
+                ]), requestAction: false, selectedProvider: $provider);
+            } finally {
+                $this->dropTemporaryTables();
+            }
+        });
     }
 
     public function test_start_accepts_player_names_up_to_128_characters(): void
@@ -845,6 +1073,164 @@ final class GameServerTest extends DatabaseTestCase
 
         self::assertNull($error, 'Authentication exceptions must be handled by onOpen.');
         self::assertSame([42], $server->disconnected);
+    }
+
+    /**
+     * @param  list<array{uid:string,type:string,amount:int}>  $settlement
+     * @return list<list<array{type:string,data:array<string,mixed>}>>
+     */
+    private function wpkHuntRoundHands(string $room, string $lastWinner, array $settlement): array
+    {
+        $players = [
+            ['uid' => 'p1', 'seat' => 1, 'stack' => 20000, 'hero' => true],
+            ['uid' => 'p2', 'seat' => 2, 'stack' => 20000, 'hero' => false],
+            ['uid' => 'p3', 'seat' => 3, 'stack' => 20000, 'hero' => false],
+            ['uid' => 'p4', 'seat' => 4, 'stack' => 20000, 'hero' => false],
+        ];
+        $hands = [];
+        foreach ([0, 2] as $index => $played) {
+            $hands[] = [
+                ['type' => 'START', 'data' => [
+                    'gameKey' => $room.'#'.($index + 1), 'network' => 'WPK_CLUB',
+                    'ante' => 0, 'smallBlind' => 100, 'bigBlind' => 200, 'buttonSeatNumber' => 1,
+                    'players' => $players, 'playerCounts' => ['p1' => $played, 'p2' => 0, 'p3' => 0, 'p4' => 0],
+                    'gameType' => 'SQUID', 'squidMode' => 'HUNT', 'squidCost' => 300,
+                    'squidNumber' => 3, 'squidRound' => 1, 'squidPlayed' => $played,
+                ]],
+                ['type' => 'BLIND_POSTED', 'data' => ['uid' => 'p2', 'type' => 'SB', 'amount' => 100]],
+                ['type' => 'BLIND_POSTED', 'data' => ['uid' => 'p3', 'type' => 'BB', 'amount' => 200]],
+                ['type' => 'STAGE', 'data' => ['stage' => 'PREFLOP', 'cards' => []]],
+                ['type' => 'DEALT', 'data' => ['cards' => ['As', 'Kd']]],
+                ['type' => 'ACTION', 'data' => ['uid' => 'p4', 'action' => 'CALL', 'amount' => 200]],
+                ['type' => 'ACTION', 'data' => ['uid' => 'p1', 'action' => 'CALL', 'amount' => 200]],
+                ['type' => 'GOT_SQUID', 'data' => ['uid' => $index === 0 ? 'p1' : $lastWinner,
+                    'count' => $index === 0 ? 2 : 1]],
+                ['type' => 'OVER', 'data' => [
+                    'winners' => [['uid' => $index === 0 ? 'p1' : $lastWinner, 'amount' => 300]],
+                    ...($index === 1 ? ['squid' => $settlement] : []),
+                ]],
+            ];
+        }
+
+        return $hands;
+    }
+
+    /**
+     * @param  list<list<array{type:string,data:array<string,mixed>}>>  $hands
+     * @return list<array<string,mixed>>
+     */
+    private function replayWpkSquidHands(
+        array $hands,
+        bool $requestAction = true,
+        ?string $httpUrl = null,
+        ?BaseProvider $selectedProvider = null,
+    ): array {
+        $client = new class implements ClientInterface
+        {
+            /** @var list<array<string,mixed>> */
+            public array $commands = [];
+
+            /** @param array<string,mixed> $settings */
+            public function set(array $settings): bool
+            {
+                return true;
+            }
+
+            /** @param array<string,list<string>> $headers */
+            public function request(string $method = 'GET', string $path = '/', array $headers = [], string $contents = '', string $version = '1.1'): RawResponseInterface
+            {
+                $body = json_decode($contents, true, 512, JSON_THROW_ON_ERROR);
+                if (isset($body['token'])) {
+                    return new RawResponse(200, [], '{"result":true,"sessionId":"wpk-replay"}', $version);
+                }
+                $this->commands[] = $body;
+                $reply = $body['structType'] === 'getAnswer'
+                    ? ['structType' => 'playerAction', 'gameId' => $body['gameId'], 'action' => 'check']
+                    : ['result' => true];
+
+                return new RawResponse(200, [], json_encode($reply, JSON_THROW_ON_ERROR), $version);
+            }
+        };
+        $provider = $selectedProvider ?? new ProtoHttpProvider([
+            'url' => $httpUrl ?? 'https://proto.example', 'token' => 'test-token', 'player_id' => 'wpk-replay',
+            'network' => 'WE',
+        ], $httpUrl === null
+            ? static fn (string $host, int $port, bool $ssl): ClientInterface => $client
+            : static fn (string $host, int $port, bool $ssl): ClientInterface => new ProtoHttpLoopbackClient($host, $port, $ssl),
+            new FakeProtoHttpRedis);
+        $user = $this->user('wpk-'.bin2hex(random_bytes(4)).'@example.test');
+        $providerName = $selectedProvider instanceof ProtoProvider ? 'proto' : 'proto_http';
+        $connection = new GameServerConnectionVo(11, $user, 'wpk-replay-'.bin2hex(random_bytes(4)), $providerName);
+        $connection->ready = true;
+        $sender = new FakeGameServerSender;
+        $server = $this->gameServerWithConnections(new IdelProvider, [11 => $connection], $sender,
+            additionalProviders: [$providerName => $provider]);
+        $socketServer = new class {};
+        $index = 0;
+        $roomSuffix = '-'.bin2hex(random_bytes(4));
+        $timestamp = (int) floor(microtime(true) * 1000);
+        $send = static function (string $type, array $payload) use ($server, $socketServer, $sender, &$index, $timestamp): array {
+            $frame = new Frame;
+            $frame->fd = 11;
+            $frame->data = json_encode([
+                'id' => 'replay-'.$index, 'type' => $type, 'timestamp' => $timestamp + $index++, 'payload' => $payload,
+            ], JSON_THROW_ON_ERROR);
+            $server->onMessage($socketServer, $frame);
+            $reply = end($sender->messages);
+            self::assertIsArray($reply);
+            self::assertSame($type.'.ACK', $reply['type'], json_encode($reply, JSON_THROW_ON_ERROR));
+
+            return $reply['payload'] ?? [];
+        };
+        if ($selectedProvider instanceof ProtoProvider) {
+            $provider->connect($connection);
+        }
+        try {
+            foreach ($hands as $hand) {
+                $uuid = null;
+                $heroUid = null;
+                $requestedAction = false;
+                foreach ($hand as $event) {
+                    $type = $event['type'];
+                    $data = $event['data'];
+                    if ($type === 'START') {
+                        $counts = $data['playerCounts'];
+                        $players = $data['players'];
+                        $heroUid = current(array_column(array_filter($players,
+                            static fn (array $player): bool => $player['hero']), 'uid'));
+                        $reply = $send('START', [
+                            'game_key' => str_replace('#', $roomSuffix.'#', $data['gameKey']),
+                            'network' => $data['network'],
+                            'ante' => $data['ante'], 'small_blind' => $data['smallBlind'],
+                            'big_blind' => $data['bigBlind'], 'button_seat_number' => $data['buttonSeatNumber'],
+                            'players' => $players, 'gameType' => $data['gameType'], 'squidMode' => $data['squidMode'],
+                            'squidCost' => $data['squidCost'], 'squidNumber' => $data['squidNumber'],
+                            'squidRound' => $data['squidRound'], 'squidPlayed' => $data['squidPlayed'],
+                        ]);
+                        $uuid = $reply['game_uuid'];
+                        foreach ($players as $player) {
+                            $send('PLAYER_HAS_SQUID', [
+                                'game_uuid' => $uuid, 'uid' => $player['uid'], 'count' => $counts[$player['uid']] ?? 0,
+                            ]);
+                        }
+
+                        continue;
+                    }
+                    self::assertNotNull($uuid);
+                    if ($type === 'ACTION' && $data['uid'] === $heroUid && $requestAction && ! $requestedAction) {
+                        $send('REQUEST_ACTION', ['game_uuid' => $uuid]);
+                        $requestedAction = true;
+                    }
+                    $send($type, ['game_uuid' => $uuid, ...$data]);
+                }
+            }
+        } finally {
+            if ($selectedProvider instanceof ProtoProvider) {
+                $provider->disconnect($connection);
+            }
+        }
+
+        return $client->commands;
     }
 
     /**

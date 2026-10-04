@@ -61,12 +61,46 @@ final class GameVoTest extends TestCase
         self::assertCount(3, $game->events);
     }
 
+    public function test_each_squid_player_reports_current_count_as_a_separate_event(): void
+    {
+        $game = new GameVo(1, '11111111-1111-4111-8111-000000000100', NetworkEnum::OK, 'room#100', 6, 3, 0, [
+            ['uid' => 'hero', 'seat' => 1, 'stack' => 100, 'hero' => true],
+            ['uid' => 'villain', 'seat' => 2, 'stack' => 100, 'hero' => false],
+        ], 1, 'client-a', gameType: 'SQUID', squidMode: 'HUNT', squidCost: 24, squidNumber: 8,
+            squidRound: 1, squidPlayed: 2);
+
+        $first = $game->event(GameEventTypeEnum::PLAYER_HAS_SQUID, ['uid' => 'hero', 'count' => 2], 1);
+        $game->event(GameEventTypeEnum::PLAYER_HAS_SQUID, ['uid' => 'villain', 'count' => 0], 2);
+
+        self::assertSame(['hero' => 2, 'villain' => 0], $game->squidPlayers);
+        self::assertSame($first, $game->event(GameEventTypeEnum::PLAYER_HAS_SQUID, ['uid' => 'hero', 'count' => 2], 3));
+        self::assertCount(2, $game->events);
+    }
+
+    public function test_missing_player_squid_count_defaults_to_zero_without_blocking_blinds(): void
+    {
+        $game = new GameVo(1, '11111111-1111-4111-8111-000000000105', NetworkEnum::OK, 'room#105', 6, 3, 0, [
+            ['uid' => 'hero', 'seat' => 1, 'stack' => 100, 'hero' => true],
+            ['uid' => 'villain', 'seat' => 2, 'stack' => 100, 'hero' => false],
+        ], 1, 'client-a', gameType: 'SQUID', squidMode: 'HUNT', squidCost: 24, squidNumber: 8,
+            squidRound: 1, squidPlayed: 0);
+        $game->event(GameEventTypeEnum::PLAYER_HAS_SQUID, ['uid' => 'hero', 'count' => 0], 1);
+        $game->event(GameEventTypeEnum::BLIND_POSTED, [
+            'uid' => 'villain', 'type' => 'BB', 'amount' => 6,
+        ], 2);
+
+        self::assertSame(6, $game->playerOrFail('villain')->blind);
+        self::assertSame(0, $game->squidPlayers['villain'] ?? 0);
+    }
+
     public function test_squid_award_and_round_settlement_are_recorded_in_the_hand(): void
     {
         $game = new GameVo(1, '11111111-1111-4111-8111-000000000101', NetworkEnum::OK, 'room#101', 6, 3, 0, [
             ['uid' => 'hero', 'seat' => 1, 'stack' => 100, 'hero' => true],
             ['uid' => 'villain', 'seat' => 2, 'stack' => 100, 'hero' => false],
-        ], 1, 'client-a', gameType: 'SQUID', squidMode: 'HUNT', squidCost: 24, squidNumber: 8, squidRound: 1);
+        ], 1, 'client-a', gameType: 'SQUID', squidMode: 'HUNT', squidCost: 24, squidNumber: 8, squidRound: 1, squidPlayed: 0);
+        $game->event(GameEventTypeEnum::PLAYER_HAS_SQUID, ['uid' => 'hero', 'count' => 0], 1);
+        $game->event(GameEventTypeEnum::PLAYER_HAS_SQUID, ['uid' => 'villain', 'count' => 0], 1);
 
         $award = $game->event(GameEventTypeEnum::GOT_SQUID, ['uid' => 'HERO', 'count' => 2], 1);
         $over = $game->event(GameEventTypeEnum::OVER, [
@@ -90,7 +124,9 @@ final class GameVoTest extends TestCase
             ['uid' => 'hero', 'seat' => 1, 'stack' => 100, 'hero' => true],
             ['uid' => 'villain', 'seat' => 2, 'stack' => 100, 'hero' => false],
         ], 1, 'client-a', gameType: 'SQUID', squidMode: 'HUNT', squidCost: 24, squidNumber: 8,
-            squidRound: 1, squidPlayed: 8, squidPlayers: ['hero' => 3, 'villain' => 1]);
+            squidRound: 1, squidPlayed: 8);
+        $game->event(GameEventTypeEnum::PLAYER_HAS_SQUID, ['uid' => 'hero', 'count' => 3], 1);
+        $game->event(GameEventTypeEnum::PLAYER_HAS_SQUID, ['uid' => 'villain', 'count' => 1], 1);
 
         $over = $game->event(GameEventTypeEnum::OVER, [
             'winners' => [['uid' => 'hero', 'amount' => 20]],
@@ -106,7 +142,9 @@ final class GameVoTest extends TestCase
             ['uid' => 'hero', 'seat' => 1, 'stack' => 100, 'hero' => true],
             ['uid' => 'villain', 'seat' => 2, 'stack' => 100, 'hero' => false],
         ], 1, 'client-a', gameType: 'SQUID', squidMode: 'HUNT', squidCost: 24, squidNumber: 8,
-            squidRound: 1, squidPlayed: 7, squidPlayers: ['hero' => 3, 'villain' => 4]);
+            squidRound: 1, squidPlayed: 7);
+        $game->event(GameEventTypeEnum::PLAYER_HAS_SQUID, ['uid' => 'hero', 'count' => 3], 1);
+        $game->event(GameEventTypeEnum::PLAYER_HAS_SQUID, ['uid' => 'villain', 'count' => 4], 1);
 
         $this->expectException(GameException::class);
         $game->event(GameEventTypeEnum::GOT_SQUID, ['uid' => 'hero', 'count' => 2], 1);

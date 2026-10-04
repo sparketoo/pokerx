@@ -22,7 +22,7 @@ use Tests\Support\DatabaseTestCase;
 
 final class GameServiceTest extends DatabaseTestCase
 {
-    public function test_squid_awards_accumulate_across_hands_and_reset_for_a_new_round(): void
+    public function test_squid_hands_use_their_own_platform_snapshots(): void
     {
         $container = ApplicationContext::getContainer();
         $service = new GameService(
@@ -33,39 +33,38 @@ final class GameServiceTest extends DatabaseTestCase
         );
         $room = 'squid-'.bin2hex(random_bytes(4));
         $players = [
-            ['uid' => 'hero', 'name' => 'Hero', 'seat' => 1, 'stack' => 100, 'hero' => true, 'squidNumber' => 0],
-            ['uid' => 'villain', 'name' => 'Villain', 'seat' => 2, 'stack' => 100, 'hero' => false, 'squidNumber' => 0],
+            ['uid' => 'hero', 'name' => 'Hero', 'seat' => 1, 'stack' => 100, 'hero' => true],
+            ['uid' => 'villain', 'name' => 'Villain', 'seat' => 2, 'stack' => 100, 'hero' => false],
         ];
         $first = $service->create(1, $room.'#1', NetworkEnum::OK, 0, 6, 3, $players, 1, 'client-a',
             'SQUID', 'HUNT', 24, 8, 1, 0);
-        self::assertSame(0, $first->squidPlayed);
-        $service->event($first->uuid, GameEventTypeEnum::GOT_SQUID, [
-            'uid' => 'hero', 'count' => 2,
-        ], time() * 1000, 1, 'client-a');
-        $service->event($first->uuid, GameEventTypeEnum::GOT_SQUID, [
-            'uid' => 'hero', 'count' => 2,
-        ], time() * 1000, 1, 'client-a');
-
-        $players[0]['squidNumber'] = 1;
-        try {
-            $service->create(1, $room.'#2', NetworkEnum::OK, 0, 6, 3, $players, 1, 'client-a',
-                'SQUID', 'HUNT', 24, 8, 1, 1);
-            self::fail('An older platform snapshot must not undo an award.');
-        } catch (GameException $error) {
-            self::assertSame(ErrorCode::EVENT_INVALID, $error->getCode());
+        foreach ($players as $player) {
+            $service->event($first->uuid, GameEventTypeEnum::PLAYER_HAS_SQUID, [
+                'uid' => $player['uid'], 'count' => 0,
+            ], time() * 1000, 1, 'client-a');
         }
+        $service->event($first->uuid, GameEventTypeEnum::GOT_SQUID, [
+            'uid' => 'hero', 'count' => 2,
+        ], time() * 1000, 1, 'client-a');
 
-        $players[0]['squidNumber'] = 2;
         $second = $service->create(1, $room.'#2', NetworkEnum::OK, 0, 6, 3, $players, 1, 'client-a',
-            'SQUID', 'HUNT', 24, 8, 1, 2);
-        self::assertSame(2, $second->squidPlayed);
-        self::assertSame(2, $second->squidPlayers['hero']);
-        self::assertSame(0, $second->squidPlayers['villain']);
+            'SQUID', 'HUNT', 24, 8, 1, 1);
+        $service->event($second->uuid, GameEventTypeEnum::PLAYER_HAS_SQUID, [
+            'uid' => 'hero', 'count' => 1,
+        ], time() * 1000, 1, 'client-a');
+        $service->event($second->uuid, GameEventTypeEnum::PLAYER_HAS_SQUID, [
+            'uid' => 'villain', 'count' => 0,
+        ], time() * 1000, 1, 'client-a');
+        self::assertSame(1, $second->squidPlayed);
+        self::assertSame(1, $service->find($second->uuid)->squidPlayers['hero']);
 
-        $players[0]['squidNumber'] = 0;
-        $nextRound = $service->create(1, $room.'#3', NetworkEnum::OK, 0, 6, 3, $players, 1, 'client-a',
-            'SQUID', 'HUNT', 24, 8, 2, 0);
-        self::assertSame(0, $nextRound->squidPlayed);
+        $third = $service->create(1, $room.'#3', NetworkEnum::OK, 0, 6, 3, $players, 1, 'client-a',
+            'SQUID', 'HUNT', 24, 8, 1, 0);
+        $service->event($third->uuid, GameEventTypeEnum::PLAYER_HAS_SQUID, [
+            'uid' => 'hero', 'count' => 0,
+        ], time() * 1000, 1, 'client-a');
+        self::assertSame(0, $third->squidPlayed);
+        self::assertSame(0, $service->find($third->uuid)->squidPlayers['hero']);
     }
 
     public function test_squid_start_uses_platform_snapshot_when_joining_an_active_round(): void
@@ -79,15 +78,21 @@ final class GameServiceTest extends DatabaseTestCase
         );
         $room = 'squid-'.bin2hex(random_bytes(4));
         $game = $service->create(1, $room.'#9', NetworkEnum::OK, 0, 6, 3, [
-            ['uid' => 'hero', 'name' => 'Hero', 'seat' => 1, 'stack' => 100, 'hero' => true, 'squidNumber' => 1],
-            ['uid' => 'villain', 'name' => 'Villain', 'seat' => 2, 'stack' => 100, 'hero' => false, 'squidNumber' => 2],
+            ['uid' => 'hero', 'name' => 'Hero', 'seat' => 1, 'stack' => 100, 'hero' => true],
+            ['uid' => 'villain', 'name' => 'Villain', 'seat' => 2, 'stack' => 100, 'hero' => false],
         ], 1, 'client-a', 'SQUID', 'HUNT', 24, 8, 3, 3);
+        $service->event($game->uuid, GameEventTypeEnum::PLAYER_HAS_SQUID, [
+            'uid' => 'hero', 'count' => 1,
+        ], time() * 1000, 1, 'client-a');
+        $service->event($game->uuid, GameEventTypeEnum::PLAYER_HAS_SQUID, [
+            'uid' => 'villain', 'count' => 2,
+        ], time() * 1000, 1, 'client-a');
 
         self::assertSame(3, $game->squidPlayed);
-        self::assertSame(['hero' => 1, 'villain' => 2], $game->squidPlayers);
+        self::assertSame(['hero' => 1, 'villain' => 2], $service->find($game->uuid)->squidPlayers);
     }
 
-    public function test_squid_start_requires_a_complete_platform_snapshot(): void
+    public function test_squid_start_requires_played_total_but_accepts_platform_player_counts(): void
     {
         $container = ApplicationContext::getContainer();
         $service = new GameService(
@@ -97,8 +102,8 @@ final class GameServiceTest extends DatabaseTestCase
             $container->get(LoggerInterface::class),
         );
         $players = [
-            ['uid' => 'hero', 'name' => 'Hero', 'seat' => 1, 'stack' => 100, 'hero' => true, 'squidNumber' => 1],
-            ['uid' => 'villain', 'name' => 'Villain', 'seat' => 2, 'stack' => 100, 'hero' => false, 'squidNumber' => 2],
+            ['uid' => 'hero', 'name' => 'Hero', 'seat' => 1, 'stack' => 100, 'hero' => true],
+            ['uid' => 'villain', 'name' => 'Villain', 'seat' => 2, 'stack' => 100, 'hero' => false],
         ];
         $room = 'squid-'.bin2hex(random_bytes(4));
 
@@ -110,16 +115,18 @@ final class GameServiceTest extends DatabaseTestCase
             self::assertSame(ErrorCode::EVENT_INVALID, $error->getCode());
         }
 
-        try {
-            $service->create(1, $room.'#2', NetworkEnum::OK, 0, 6, 3, $players, 1, 'client-a',
-                'SQUID', 'HUNT', 24, 8, 1, 2);
-            self::fail('Player squid counts cannot exceed the played total.');
-        } catch (GameException $error) {
-            self::assertSame(ErrorCode::EVENT_INVALID, $error->getCode());
-        }
+        $game = $service->create(1, $room.'#2', NetworkEnum::OK, 0, 6, 3, $players, 1, 'client-a',
+            'SQUID', 'HUNT', 24, 8, 1, 2);
+        $service->event($game->uuid, GameEventTypeEnum::PLAYER_HAS_SQUID, [
+            'uid' => 'hero', 'count' => 1,
+        ], time() * 1000, 1, 'client-a');
+        $service->event($game->uuid, GameEventTypeEnum::PLAYER_HAS_SQUID, [
+            'uid' => 'villain', 'count' => 2,
+        ], time() * 1000, 1, 'client-a');
+        self::assertSame(['hero' => 1, 'villain' => 2], $service->find($game->uuid)->squidPlayers);
     }
 
-    public function test_late_award_cannot_double_count_a_newer_platform_snapshot(): void
+    public function test_late_award_updates_only_its_own_hand(): void
     {
         $container = ApplicationContext::getContainer();
         $service = new GameService(
@@ -130,27 +137,33 @@ final class GameServiceTest extends DatabaseTestCase
         );
         $room = 'squid-'.bin2hex(random_bytes(4));
         $players = [
-            ['uid' => 'hero', 'name' => 'Hero', 'seat' => 1, 'stack' => 100, 'hero' => true, 'squidNumber' => 0],
-            ['uid' => 'villain', 'name' => 'Villain', 'seat' => 2, 'stack' => 100, 'hero' => false, 'squidNumber' => 0],
+            ['uid' => 'hero', 'name' => 'Hero', 'seat' => 1, 'stack' => 100, 'hero' => true],
+            ['uid' => 'villain', 'name' => 'Villain', 'seat' => 2, 'stack' => 100, 'hero' => false],
         ];
         $first = $service->create(1, $room.'#1', NetworkEnum::OK, 0, 6, 3, $players, 1, 'client-a',
             'SQUID', 'HUNT', 24, 8, 1, 0);
-        $players[0]['squidNumber'] = 2;
-        $service->create(1, $room.'#2', NetworkEnum::OK, 0, 6, 3, $players, 1, 'client-a',
-            'SQUID', 'HUNT', 24, 8, 1, 2);
-
-        try {
-            $service->event($first->uuid, GameEventTypeEnum::GOT_SQUID, [
-                'uid' => 'hero', 'count' => 2,
+        foreach ($players as $player) {
+            $service->event($first->uuid, GameEventTypeEnum::PLAYER_HAS_SQUID, [
+                'uid' => $player['uid'], 'count' => 0,
             ], time() * 1000, 1, 'client-a');
-            self::fail('An award already included in a newer snapshot must not be counted again.');
-        } catch (GameException $error) {
-            self::assertSame(ErrorCode::EVENT_INVALID, $error->getCode());
         }
-
-        $third = $service->create(1, $room.'#3', NetworkEnum::OK, 0, 6, 3, $players, 1, 'client-a',
+        $second = $service->create(1, $room.'#2', NetworkEnum::OK, 0, 6, 3, $players, 1, 'client-a',
             'SQUID', 'HUNT', 24, 8, 1, 2);
-        self::assertSame(2, $third->squidPlayed);
+        $service->event($second->uuid, GameEventTypeEnum::PLAYER_HAS_SQUID, [
+            'uid' => 'hero', 'count' => 2,
+        ], time() * 1000, 1, 'client-a');
+        $service->event($second->uuid, GameEventTypeEnum::PLAYER_HAS_SQUID, [
+            'uid' => 'villain', 'count' => 0,
+        ], time() * 1000, 1, 'client-a');
+
+        $award = $service->event($first->uuid, GameEventTypeEnum::GOT_SQUID, [
+            'uid' => 'hero', 'count' => 2,
+        ], time() * 1000, 1, 'client-a');
+        self::assertSame('hero', $award->payload['uid']);
+        self::assertSame(2, $second->squidPlayed);
+        self::assertSame(1, $service->find($first->uuid)->events->filter(
+            fn ($event): bool => $event->type->isGotSquid()
+        )->count());
     }
 
     public function test_same_user_can_store_one_game_per_hero_in_a_shared_hand(): void
@@ -234,7 +247,9 @@ final class GameServiceTest extends DatabaseTestCase
             ['uid' => 'hero', 'seat' => 1, 'stack' => 100, 'hero' => true],
             ['uid' => 'villain', 'seat' => 2, 'stack' => 100, 'hero' => false],
         ], 1, 'client-a', gameType: 'SQUID', squidMode: 'HUNT', squidCost: 24, squidNumber: 8,
-            squidRound: 1, squidPlayed: 2, squidPlayers: ['hero' => 2, 'villain' => 0]);
+            squidRound: 1, squidPlayed: 2);
+        $game->event(GameEventTypeEnum::PLAYER_HAS_SQUID, ['uid' => 'hero', 'count' => 2], time() * 1000);
+        $game->event(GameEventTypeEnum::PLAYER_HAS_SQUID, ['uid' => 'villain', 'count' => 0], time() * 1000);
         $game->event(GameEventTypeEnum::GOT_SQUID, ['uid' => 'hero', 'count' => 1], time() * 1000);
         $game->event(GameEventTypeEnum::OVER, ['winners' => [['uid' => 'hero', 'amount' => 20]]], time() * 1000);
 
@@ -253,6 +268,6 @@ final class GameServiceTest extends DatabaseTestCase
             self::assertInstanceOf(GameEvent::class, $event);
             $types[] = $event->type->name;
         }
-        self::assertSame(['GOT_SQUID', 'OVER'], $types);
+        self::assertSame(['PLAYER_HAS_SQUID', 'PLAYER_HAS_SQUID', 'GOT_SQUID', 'OVER'], $types);
     }
 }

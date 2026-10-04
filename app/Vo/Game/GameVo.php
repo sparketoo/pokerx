@@ -46,9 +46,11 @@ class GameVo extends Vo
 
     public readonly int $createdAtMs;
 
+    /** @var array<string, int> 本手开局时逐个玩家上报的持有数。 */
+    public array $squidPlayers = [];
+
     /**
      * @param  list<array{uid:string,name?:string,seat:int,stack:int,hero:bool}>  $players
-     * @param  array<string, int>  $squidPlayers
      */
     public function __construct(
         public readonly int $userId,
@@ -67,7 +69,6 @@ class GameVo extends Vo
         public readonly int $squidNumber = 0,
         public readonly int $squidRound = 0,
         public readonly int $squidPlayed = 0,
-        public readonly array $squidPlayers = [],
     ) {
 
         if (! in_array($this->gameType, ['NL', 'SQUID'], true)
@@ -78,12 +79,6 @@ class GameVo extends Vo
                 || $this->squidRound !== 0 || $this->squidPlayed !== 0 || $this->squidPlayers !== []))) {
             throw new GameException(__('messages.game.event_invalid'), ErrorCode::EVENT_INVALID);
         }
-        foreach ($this->squidPlayers as $count) {
-            if ($count < 0) {
-                throw new GameException(__('messages.game.event_invalid'), ErrorCode::EVENT_INVALID);
-            }
-        }
-
         if (count($players) < 2) {
             throw new GameException(__('messages.game.players_less_than_two'));
         }
@@ -218,7 +213,7 @@ class GameVo extends Vo
                 throw new GameException(__('messages.game.event_invalid'), ErrorCode::EVENT_INVALID);
             }
             // 普通盲注和补盲在其他事件前；自愿盲注可在 PREFLOP 后到达。
-            if ($blindType !== 'STRADDLE' && $this->events->contains(fn (GameEventVo $event): bool => ! $event->type->isBlindPosted() || ($event->payload['type'] ?? null) === 'STRADDLE')) {
+            if ($blindType !== 'STRADDLE' && $this->events->contains(fn (GameEventVo $event): bool => (! $event->type->isBlindPosted() && ! $event->type->isPlayerHasSquid()) || ($event->payload['type'] ?? null) === 'STRADDLE')) {
                 throw new GameException(__('messages.game.event_invalid'), ErrorCode::EVENT_INVALID);
             }
             if (($blindType === 'SB' || $blindType === 'BB')
@@ -232,6 +227,22 @@ class GameVo extends Vo
                 throw new GameException(__('messages.game.event_invalid'), ErrorCode::EVENT_INVALID);
             }
             $player->blind += $amount;
+        }
+        if ($type->isPlayerHasSquid()) {
+            $count = $payload['count'] ?? null;
+            $player = $this->playerOrFail(is_string($uid) ? $uid : '');
+            if (array_key_exists($player->uid, $this->squidPlayers)) {
+                foreach ($this->events as $existing) {
+                    if ($existing->type->isPlayerHasSquid() && $existing->payload['uid'] === $player->uid
+                        && $existing->payload['count'] === $count) {
+                        return $existing;
+                    }
+                }
+                throw new GameException(__('messages.game.event_invalid'), ErrorCode::EVENT_INVALID);
+            }
+            if ($this->gameType !== 'SQUID' || ! is_int($count) || $count < 0) {
+                throw new GameException(__('messages.game.event_invalid'), ErrorCode::EVENT_INVALID);
+            }
         }
         if ($type->isGotSquid()) {
             $count = $payload['count'] ?? null;
@@ -306,7 +317,9 @@ class GameVo extends Vo
         );
         $this->events->push($event);
 
-        if ($type->isAction()) {
+        if ($type->isPlayerHasSquid()) {
+            $this->squidPlayers[$uid] = $payload['count'];
+        } elseif ($type->isAction()) {
             // 玩家操作
             $action = ActionEnum::fromNameOrFail($payload['action']);
             $this->playerOrFail($uid ?? '')->action($action, $payload['amount'] ?? null);

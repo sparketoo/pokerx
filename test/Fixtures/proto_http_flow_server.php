@@ -40,6 +40,14 @@ $server->on('request', static function (Request $request, Response $response) us
 
         return;
     }
+    foreach ($payload['events'] ?? [] as $event) {
+        if (($event['eventType'] ?? null) === 'playerHasSquid'
+            && (! is_int($event['count'] ?? null) || $event['count'] <= 0)) {
+            $respond(400, ['error' => "Invalid player's squidCount"]);
+
+            return;
+        }
+    }
     file_put_contents($capture, json_encode([
         'payload' => $payload,
         'pid' => $request->get['pid'] ?? null,

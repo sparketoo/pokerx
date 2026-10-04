@@ -42,6 +42,11 @@ abstract class DatabaseTestCase extends TestCase
         $this->previousResponse = ResponseContext::getOrNull();
         $this->previousUser = Context::get(User::class);
 
+        $this->createTemporaryTables();
+    }
+
+    protected function createTemporaryTables(): void
+    {
         Db::statement("SET time_zone = '".appTimezoneOffset()."'");
         Db::statement("CREATE TEMPORARY TABLE users (
             id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
@@ -116,7 +121,7 @@ abstract class DatabaseTestCase extends TestCase
             id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
             user_id BIGINT UNSIGNED NOT NULL,
             game_id BIGINT UNSIGNED NOT NULL,
-            type ENUM('START','BLIND_POSTED','STAGE','DEALT','ACTION','SHOW','INSURANCE_PURCHASED','GOT_SQUID','ABORT','OVER') NOT NULL,
+            type ENUM('START','BLIND_POSTED','STAGE','DEALT','ACTION','SHOW','INSURANCE_PURCHASED','PLAYER_HAS_SQUID','GOT_SQUID','ABORT','OVER') NOT NULL,
             timestamp BIGINT UNSIGNED NOT NULL,
             payload JSON NOT NULL,
             created_at TIMESTAMP(6) NULL,
@@ -126,14 +131,19 @@ abstract class DatabaseTestCase extends TestCase
 
     protected function tearDown(): void
     {
-        foreach (['game_events', 'game_players', 'games', 'user_tokens', 'users'] as $table) {
-            Db::statement('DROP TEMPORARY TABLE IF EXISTS '.$table);
-        }
+        $this->dropTemporaryTables();
         Context::set(User::class, $this->previousUser);
         Context::set(ServerRequestInterface::class, $this->previousRequest);
         Context::set(ResponseInterface::class, $this->previousResponse);
         Context::destroy('http.request.parsedData');
         parent::tearDown();
+    }
+
+    protected function dropTemporaryTables(): void
+    {
+        foreach (['game_events', 'game_players', 'games', 'user_tokens', 'users'] as $table) {
+            Db::statement('DROP TEMPORARY TABLE IF EXISTS '.$table);
+        }
     }
 
     /**

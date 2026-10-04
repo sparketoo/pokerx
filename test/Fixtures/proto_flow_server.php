@@ -36,6 +36,18 @@ $server->on('message', function (Server $server, Frame $frame) use (
         return;
     }
 
+    foreach ($message['events'] ?? [] as $event) {
+        if (($event['eventType'] ?? null) === 'playerHasSquid'
+            && (! is_int($event['count'] ?? null) || $event['count'] <= 0)) {
+            $server->push($frame->fd, json_encode([
+                'error' => "Invalid player's squidCount",
+                'gameId' => $message['game']['gameId'] ?? null,
+            ], JSON_THROW_ON_ERROR));
+
+            return;
+        }
+    }
+
     file_put_contents($capture, json_encode($message, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE)."\n", FILE_APPEND | LOCK_EX);
     if (($message['structType'] ?? null) === 'getAnswer') {
         $gameId = (string) ($message['gameId'] ?? '');

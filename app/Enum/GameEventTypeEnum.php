@@ -22,6 +22,8 @@ enum GameEventTypeEnum
     case SHOW;
     // 本人确认购买保险
     case INSURANCE_PURCHASED;
+    // 开局时玩家当前持有鱿鱼
+    case PLAYER_HAS_SQUID;
     // 本手获得鱿鱼
     case GOT_SQUID;
     // 游戏异常终止
@@ -62,6 +64,11 @@ enum GameEventTypeEnum
     public function isInsurancePurchased(): bool
     {
         return $this->is(self::INSURANCE_PURCHASED);
+    }
+
+    public function isPlayerHasSquid(): bool
+    {
+        return $this->is(self::PLAYER_HAS_SQUID);
     }
 
     public function isGotSquid(): bool

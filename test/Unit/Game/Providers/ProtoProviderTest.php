@@ -6,9 +6,11 @@ namespace Tests\Unit\Game\Providers;
 
 use App\Enum\ActionEnum;
 use App\Enum\GameEventTypeEnum;
+use App\Enum\NetworkEnum;
 use App\Game\Providers\ProtoProvider;
 use App\Model\User;
 use App\Vo\Game\GameServerConnectionVo;
+use App\Vo\Game\GameVo;
 use App\Vo\Game\RequestActionResultVo;
 use Hyperf\Redis\Redis;
 use Swoole\Coroutine;
@@ -198,6 +200,84 @@ final class ProtoProviderTest extends TestCase
 
             $provider->disconnect($connection);
         });
+    }
+
+    public function test_wpk_squid_modes_reach_local_proto_websocket_peer(): void
+    {
+        $url = getenv('WPK_PROTO_WS_REPLAY_URL');
+        $capture = getenv('WPK_PROTO_WS_REPLAY_CAPTURE');
+        if (! is_string($url) || $url === '' || ! is_string($capture) || $capture === '') {
+            self::markTestSkipped('Start the local Proto WebSocket peer and set WPK_PROTO_WS_REPLAY_URL and WPK_PROTO_WS_REPLAY_CAPTURE.');
+        }
+        Coroutine\run(function () use ($url): void {
+            $provider = new ProtoProvider([
+                'url' => $url, 'token' => 'wpk-replay-token', 'player_id' => 'wpk-replay',
+                'network' => 'WE', 'delay' => 0,
+            ], $this->redis());
+            $user = new User;
+            $user->id = 1;
+            $connection = new GameServerConnectionVo(11, $user, 'wpk-replay', 'proto');
+            $provider->connect($connection);
+            $players = [
+                ['uid' => 'p1', 'seat' => 1, 'stack' => 20000, 'hero' => true],
+                ['uid' => 'p2', 'seat' => 2, 'stack' => 20000, 'hero' => false],
+                ['uid' => 'p3', 'seat' => 3, 'stack' => 20000, 'hero' => false],
+                ['uid' => 'p4', 'seat' => 4, 'stack' => 20000, 'hero' => false],
+            ];
+            $cases = [
+                ['STAND_UP', ['p1' => 1, 'p2' => 1, 'p3' => 0, 'p4' => 0], 'p3',
+                    [['uid' => 'p1', 'type' => 'payout', 'amount' => 300],
+                        ['uid' => 'p2', 'type' => 'payout', 'amount' => 300],
+                        ['uid' => 'p3', 'type' => 'payout', 'amount' => 300],
+                        ['uid' => 'p4', 'type' => 'penaly', 'amount' => 900]]],
+                ['HUNT', ['p1' => 2, 'p2' => 0, 'p3' => 0, 'p4' => 0], 'p2',
+                    [['uid' => 'p1', 'type' => 'payout', 'amount' => 1200],
+                        ['uid' => 'p2', 'type' => 'payout', 'amount' => 600],
+                        ['uid' => 'p3', 'type' => 'penaly', 'amount' => 900],
+                        ['uid' => 'p4', 'type' => 'penaly', 'amount' => 900]]],
+                ['HUNT', ['p1' => 2, 'p2' => 0, 'p3' => 0, 'p4' => 0], 'p1',
+                    [['uid' => 'p1', 'type' => 'payout', 'amount' => 5400],
+                        ['uid' => 'p2', 'type' => 'penaly', 'amount' => 1800],
+                        ['uid' => 'p3', 'type' => 'penaly', 'amount' => 1800],
+                        ['uid' => 'p4', 'type' => 'penaly', 'amount' => 1800]]],
+            ];
+            foreach ($cases as $index => [$mode, $counts, $winner, $settlement]) {
+                $game = new GameVo(1, sprintf('11111111-1111-4111-8111-%012d', $index + 1),
+                    NetworkEnum::WPK_CLUB, 'wpk-ws-'.($index + 1).'#1', 200, 100, 0,
+                    $players, 1, 'wpk-replay', 'SQUID', $mode, 300, 3, 1, 2);
+                foreach ($counts as $uid => $count) {
+                    $game->event(GameEventTypeEnum::PLAYER_HAS_SQUID, ['uid' => $uid, 'count' => $count], 1000 + $index);
+                }
+                if ($index < 2) {
+                    $answer = null;
+                    $provider->requestAction($game, static function (RequestActionResultVo $result) use (&$answer): void {
+                        $answer = $result;
+                    });
+                    self::assertTrue($answer?->success);
+                }
+                $game->event(GameEventTypeEnum::GOT_SQUID, ['uid' => $winner, 'count' => 1], 2000 + $index);
+                $over = $game->event(GameEventTypeEnum::OVER, [
+                    'winners' => [['uid' => $winner, 'amount' => 300]],
+                    'squid' => $settlement,
+                ], 3000 + $index);
+                $provider->over($over);
+            }
+            Coroutine::sleep(0.05);
+            $provider->disconnect($connection);
+        });
+
+        $lines = file($capture, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+        if ($lines === false) {
+            throw new \RuntimeException('Could not read the Proto WebSocket replay capture.');
+        }
+        $records = array_map(static fn (string $line): array => json_decode($line, true, 512, JSON_THROW_ON_ERROR), $lines);
+        $logs = array_values(array_filter($records, static fn (array $record): bool => ($record['structType'] ?? null) === 'fullGameLog'));
+        self::assertCount(3, $logs);
+        self::assertSame(['STAND_UP', 'HUNT', 'HUNT'], array_map(static fn (array $log): string => $log['game']['squidMode'], $logs));
+        self::assertSame([[300, 300, 300], [1200, 600], [5400]], array_map(static fn (array $log): array => array_column(array_values(array_filter($log['events'],
+            static fn (array $event): bool => $event['eventType'] === 'squidPayment')), 'amount'), $logs));
+        self::assertSame([[900], [900, 900], [1800, 1800, 1800]], array_map(static fn (array $log): array => array_column(array_values(array_filter($log['events'],
+            static fn (array $event): bool => $event['eventType'] === 'squidPenalty')), 'amount'), $logs));
     }
 
     private function redis(): Redis

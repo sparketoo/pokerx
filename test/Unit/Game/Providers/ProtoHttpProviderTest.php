@@ -790,7 +790,9 @@ final class ProtoHttpProviderTest extends TestCase
             ['uid' => 'hero', 'seat' => 1, 'stack' => 100, 'hero' => true],
             ['uid' => 'villain', 'seat' => 2, 'stack' => 100, 'hero' => false],
         ], 1, 'client-a', gameType: 'SQUID', squidMode: 'HUNT', squidCost: 24, squidNumber: 8,
-            squidRound: 1, squidPlayed: 2, squidPlayers: ['hero' => 2, 'villain' => 0]);
+            squidRound: 1, squidPlayed: 2);
+        $game->event(GameEventTypeEnum::PLAYER_HAS_SQUID, ['uid' => 'hero', 'count' => 2], 1);
+        $game->event(GameEventTypeEnum::PLAYER_HAS_SQUID, ['uid' => 'villain', 'count' => 0], 1);
         $game->event(GameEventTypeEnum::GOT_SQUID, ['uid' => 'hero', 'count' => 2], 1);
         $game->event(GameEventTypeEnum::OVER, [
             'winners' => [['uid' => 'hero', 'amount' => 20]],
@@ -809,6 +811,8 @@ final class ProtoHttpProviderTest extends TestCase
         self::assertSame(8, $message['game']['squidNumber']);
         self::assertSame(4, $message['game']['squidPlayed']);
         self::assertContains(['eventType' => 'playerHasSquid', 'name' => 'hero', 'count' => 2], $message['events']);
+        self::assertSame([['eventType' => 'playerHasSquid', 'name' => 'hero', 'count' => 2]],
+            array_values(array_filter($message['events'], static fn (array $event): bool => $event['eventType'] === 'playerHasSquid')));
         self::assertSame([
             ['eventType' => 'playerGotSquid', 'name' => 'hero'],
             ['eventType' => 'playerGotSquid', 'name' => 'hero'],
@@ -822,6 +826,20 @@ final class ProtoHttpProviderTest extends TestCase
         self::assertSame(2, $liveMessage['game']['squidPlayed']);
         self::assertNotContains('playerGotSquid', array_column($liveMessage['events'], 'eventType'));
         self::assertNotContains('squidPenalty', array_column($liveMessage['events'], 'eventType'));
+    }
+
+    public function test_proto_omits_zero_and_unreported_squid_counts(): void
+    {
+        $game = new GameVo(1, '12345678-90ab-4cde-8f01-23456789abce', NetworkEnum::OK, 'room#102', 6, 3, 0, [
+            ['uid' => 'hero', 'seat' => 1, 'stack' => 100, 'hero' => true],
+            ['uid' => 'villain', 'seat' => 2, 'stack' => 100, 'hero' => false],
+        ], 1, 'client-a', gameType: 'SQUID', squidMode: 'HUNT', squidCost: 24, squidNumber: 8,
+            squidRound: 1, squidPlayed: 2);
+        $game->event(GameEventTypeEnum::PLAYER_HAS_SQUID, ['uid' => 'hero', 'count' => 2], 1);
+
+        $events = (new ProtoHttpProvider(['network' => 'OK']))->gameEvents($game)['events'];
+        self::assertSame([['eventType' => 'playerHasSquid', 'name' => 'hero', 'count' => 2]],
+            array_values(array_filter($events, static fn (array $event): bool => $event['eventType'] === 'playerHasSquid')));
     }
 
     public function test_ok_heads_up_posts_both_calculated_blinds(): void

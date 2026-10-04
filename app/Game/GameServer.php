@@ -279,7 +279,7 @@ final class GameServer implements OnCloseInterface, OnMessageInterface, OnOpenIn
             'players.*.name' => ['string', 'max:128'],
             'players.*.hero' => ['required', 'boolean'],
             'players.*.stack' => ['required', 'integer:strict', 'min:0', 'max:100000000'],
-            'players.*.squidNumber' => ['sometimes', 'integer:strict', 'min:0', 'max:1000000'],
+            'players.*.squidNumber' => ['prohibited'],
         ])->validate();
 
         foreach ($payload['players'] as &$player) {
@@ -573,6 +573,27 @@ final class GameServer implements OnCloseInterface, OnMessageInterface, OnOpenIn
         );
 
         $this->provider($message->connection->provider)->show($event);
+        $this->ack($message->connection, $message->type, $message->id);
+    }
+
+    /** 开局时逐一上报每位玩家当前持有的鱿鱼数，包括零。 */
+    public function handlePlayerHasSquid(GameServerMessageVo $message): void
+    {
+        $payload = $this->validatorFactory->make($message->payload, [
+            'game_uuid' => ['required', 'uuid'],
+            'uid' => ['required', 'string', 'regex:/\A[A-Za-z0-9]{1,16}\z/'],
+            'count' => ['required', 'integer:strict', 'min:0', 'max:1000000'],
+        ])->validate();
+        $payload['uid'] = strtolower($payload['uid']);
+
+        $this->gameService->event(
+            $payload['game_uuid'],
+            GameEventTypeEnum::PLAYER_HAS_SQUID,
+            $payload,
+            $message->timestamp,
+            $message->connection->user->id,
+            $message->connection->clientId,
+        );
         $this->ack($message->connection, $message->type, $message->id);
     }
 

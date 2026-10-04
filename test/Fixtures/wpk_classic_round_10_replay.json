@@ -1,0 +1,1280 @@
+{
+  "provenance": "PokerX CSV 2026-10-04 06:19 UTC; classic round 10, hands 10-14. UID and room identifiers anonymized. Source lacks native WPK messages and omits final events of hand 10.",
+  "hands": {
+    "10": [
+      {
+        "type": "START",
+        "data": {
+          "gameKey": "classic#10",
+          "ante": 0,
+          "smallBlind": 100,
+          "bigBlind": 200,
+          "buttonSeatNumber": 2,
+          "players": [
+            {
+              "uid": "p1",
+              "seat": 1,
+              "hero": true,
+              "stack": 15400
+            },
+            {
+              "uid": "p2",
+              "seat": 2,
+              "hero": false,
+              "stack": 25700
+            },
+            {
+              "uid": "p3",
+              "seat": 3,
+              "hero": false,
+              "stack": 19400
+            },
+            {
+              "uid": "p4",
+              "seat": 4,
+              "hero": false,
+              "stack": 19200
+            }
+          ],
+          "gameType": "SQUID",
+          "squidMode": "STAND_UP",
+          "squidCost": 300,
+          "squidNumber": 3,
+          "squidRound": 10,
+          "squidPlayed": 0,
+          "network": "WPK_CLUB",
+          "playerCounts": {
+            "p1": 0,
+            "p2": 0,
+            "p3": 0,
+            "p4": 0
+          }
+        }
+      },
+      {
+        "type": "BLIND_POSTED",
+        "data": {
+          "uid": "p3",
+          "type": "SB",
+          "amount": 100
+        }
+      },
+      {
+        "type": "BLIND_POSTED",
+        "data": {
+          "uid": "p4",
+          "type": "BB",
+          "amount": 200
+        }
+      },
+      {
+        "type": "STAGE",
+        "data": {
+          "stage": "PREFLOP",
+          "cards": []
+        }
+      },
+      {
+        "type": "DEALT",
+        "data": {
+          "cards": [
+            "2d",
+            "Ah"
+          ]
+        }
+      },
+      {
+        "type": "ACTION",
+        "data": {
+          "uid": "p1",
+          "action": "CALL",
+          "amount": 200
+        }
+      },
+      {
+        "type": "ACTION",
+        "data": {
+          "uid": "p2",
+          "action": "CALL",
+          "amount": 200
+        }
+      },
+      {
+        "type": "ACTION",
+        "data": {
+          "uid": "p3",
+          "action": "CALL",
+          "amount": 100
+        }
+      }
+    ],
+    "11": [
+      {
+        "type": "START",
+        "data": {
+          "gameKey": "classic#11",
+          "ante": 0,
+          "smallBlind": 100,
+          "bigBlind": 200,
+          "buttonSeatNumber": 3,
+          "players": [
+            {
+              "uid": "p1",
+              "seat": 1,
+              "hero": true,
+              "stack": 15000
+            },
+            {
+              "uid": "p2",
+              "seat": 2,
+              "hero": false,
+              "stack": 26900
+            },
+            {
+              "uid": "p3",
+              "seat": 3,
+              "hero": false,
+              "stack": 18900
+            },
+            {
+              "uid": "p4",
+              "seat": 4,
+              "hero": false,
+              "stack": 18900
+            }
+          ],
+          "gameType": "SQUID",
+          "squidMode": "STAND_UP",
+          "squidCost": 300,
+          "squidNumber": 3,
+          "squidRound": 10,
+          "squidPlayed": 1,
+          "network": "WPK_CLUB",
+          "playerCounts": {
+            "p1": 0,
+            "p2": 1,
+            "p3": 0,
+            "p4": 0
+          }
+        }
+      },
+      {
+        "type": "BLIND_POSTED",
+        "data": {
+          "uid": "p4",
+          "type": "SB",
+          "amount": 100
+        }
+      },
+      {
+        "type": "BLIND_POSTED",
+        "data": {
+          "uid": "p1",
+          "type": "BB",
+          "amount": 200
+        }
+      },
+      {
+        "type": "STAGE",
+        "data": {
+          "stage": "PREFLOP",
+          "cards": []
+        }
+      },
+      {
+        "type": "DEALT",
+        "data": {
+          "cards": [
+            "7d",
+            "4c"
+          ]
+        }
+      },
+      {
+        "type": "ACTION",
+        "data": {
+          "uid": "p2",
+          "action": "CALL",
+          "amount": 200
+        }
+      },
+      {
+        "type": "ACTION",
+        "data": {
+          "uid": "p3",
+          "action": "CALL",
+          "amount": 200
+        }
+      },
+      {
+        "type": "ACTION",
+        "data": {
+          "uid": "p4",
+          "action": "CALL",
+          "amount": 100
+        }
+      },
+      {
+        "type": "ACTION",
+        "data": {
+          "uid": "p1",
+          "action": "CHECK",
+          "amount": 0
+        }
+      },
+      {
+        "type": "STAGE",
+        "data": {
+          "stage": "FLOP",
+          "cards": [
+            "3s",
+            "5s",
+            "8s"
+          ]
+        }
+      },
+      {
+        "type": "ACTION",
+        "data": {
+          "uid": "p4",
+          "action": "CHECK",
+          "amount": 0
+        }
+      },
+      {
+        "type": "ACTION",
+        "data": {
+          "uid": "p1",
+          "action": "CHECK",
+          "amount": 0
+        }
+      },
+      {
+        "type": "ACTION",
+        "data": {
+          "uid": "p2",
+          "action": "BET",
+          "amount": 200
+        }
+      },
+      {
+        "type": "ACTION",
+        "data": {
+          "uid": "p3",
+          "action": "CALL",
+          "amount": 200
+        }
+      },
+      {
+        "type": "ACTION",
+        "data": {
+          "uid": "p4",
+          "action": "CALL",
+          "amount": 200
+        }
+      },
+      {
+        "type": "ACTION",
+        "data": {
+          "uid": "p1",
+          "action": "CALL",
+          "amount": 200
+        }
+      },
+      {
+        "type": "STAGE",
+        "data": {
+          "stage": "TURN",
+          "cards": [
+            "Jd"
+          ]
+        }
+      },
+      {
+        "type": "ACTION",
+        "data": {
+          "uid": "p4",
+          "action": "CHECK",
+          "amount": 0
+        }
+      },
+      {
+        "type": "ACTION",
+        "data": {
+          "uid": "p1",
+          "action": "CHECK",
+          "amount": 0
+        }
+      },
+      {
+        "type": "ACTION",
+        "data": {
+          "uid": "p2",
+          "action": "BET",
+          "amount": 200
+        }
+      },
+      {
+        "type": "ACTION",
+        "data": {
+          "uid": "p3",
+          "action": "CALL",
+          "amount": 200
+        }
+      },
+      {
+        "type": "ACTION",
+        "data": {
+          "uid": "p4",
+          "action": "CALL",
+          "amount": 200
+        }
+      },
+      {
+        "type": "ACTION",
+        "data": {
+          "uid": "p1",
+          "action": "CALL",
+          "amount": 200
+        }
+      },
+      {
+        "type": "STAGE",
+        "data": {
+          "stage": "RIVER",
+          "cards": [
+            "7s"
+          ]
+        }
+      },
+      {
+        "type": "ACTION",
+        "data": {
+          "uid": "p4",
+          "action": "BET",
+          "amount": 200
+        }
+      },
+      {
+        "type": "ACTION",
+        "data": {
+          "uid": "p1",
+          "action": "CALL",
+          "amount": 200
+        }
+      },
+      {
+        "type": "ACTION",
+        "data": {
+          "uid": "p2",
+          "action": "CALL",
+          "amount": 200
+        }
+      },
+      {
+        "type": "ACTION",
+        "data": {
+          "uid": "p3",
+          "action": "CALL",
+          "amount": 200
+        }
+      },
+      {
+        "type": "OVER",
+        "data": {
+          "winners": [
+            {
+              "uid": "p2",
+              "amount": 3200
+            }
+          ]
+        }
+      }
+    ],
+    "12": [
+      {
+        "type": "START",
+        "data": {
+          "gameKey": "classic#12",
+          "ante": 0,
+          "smallBlind": 100,
+          "bigBlind": 200,
+          "buttonSeatNumber": 4,
+          "players": [
+            {
+              "uid": "p1",
+              "seat": 1,
+              "hero": true,
+              "stack": 14300
+            },
+            {
+              "uid": "p2",
+              "seat": 2,
+              "hero": false,
+              "stack": 29100
+            },
+            {
+              "uid": "p3",
+              "seat": 3,
+              "hero": false,
+              "stack": 18100
+            },
+            {
+              "uid": "p4",
+              "seat": 4,
+              "hero": false,
+              "stack": 18200
+            }
+          ],
+          "gameType": "SQUID",
+          "squidMode": "STAND_UP",
+          "squidCost": 300,
+          "squidNumber": 3,
+          "squidRound": 10,
+          "squidPlayed": 1,
+          "network": "WPK_CLUB",
+          "playerCounts": {
+            "p1": 0,
+            "p2": 1,
+            "p3": 0,
+            "p4": 0
+          }
+        }
+      },
+      {
+        "type": "BLIND_POSTED",
+        "data": {
+          "uid": "p1",
+          "type": "SB",
+          "amount": 100
+        }
+      },
+      {
+        "type": "BLIND_POSTED",
+        "data": {
+          "uid": "p2",
+          "type": "BB",
+          "amount": 200
+        }
+      },
+      {
+        "type": "STAGE",
+        "data": {
+          "stage": "PREFLOP",
+          "cards": []
+        }
+      },
+      {
+        "type": "DEALT",
+        "data": {
+          "cards": [
+            "Qh",
+            "8h"
+          ]
+        }
+      },
+      {
+        "type": "ACTION",
+        "data": {
+          "uid": "p3",
+          "action": "CALL",
+          "amount": 200
+        }
+      },
+      {
+        "type": "ACTION",
+        "data": {
+          "uid": "p4",
+          "action": "CALL",
+          "amount": 200
+        }
+      },
+      {
+        "type": "ACTION",
+        "data": {
+          "uid": "p1",
+          "action": "CALL",
+          "amount": 100
+        }
+      },
+      {
+        "type": "ACTION",
+        "data": {
+          "uid": "p2",
+          "action": "RAISE",
+          "amount": 200
+        }
+      },
+      {
+        "type": "ACTION",
+        "data": {
+          "uid": "p3",
+          "action": "CALL",
+          "amount": 200
+        }
+      },
+      {
+        "type": "ACTION",
+        "data": {
+          "uid": "p4",
+          "action": "CALL",
+          "amount": 200
+        }
+      },
+      {
+        "type": "ACTION",
+        "data": {
+          "uid": "p1",
+          "action": "CALL",
+          "amount": 200
+        }
+      },
+      {
+        "type": "STAGE",
+        "data": {
+          "stage": "FLOP",
+          "cards": [
+            "As",
+            "7h",
+            "5d"
+          ]
+        }
+      },
+      {
+        "type": "ACTION",
+        "data": {
+          "uid": "p1",
+          "action": "CHECK",
+          "amount": 0
+        }
+      },
+      {
+        "type": "ACTION",
+        "data": {
+          "uid": "p2",
+          "action": "BET",
+          "amount": 200
+        }
+      },
+      {
+        "type": "ACTION",
+        "data": {
+          "uid": "p3",
+          "action": "CALL",
+          "amount": 200
+        }
+      },
+      {
+        "type": "ACTION",
+        "data": {
+          "uid": "p4",
+          "action": "CALL",
+          "amount": 200
+        }
+      },
+      {
+        "type": "ACTION",
+        "data": {
+          "uid": "p1",
+          "action": "CALL",
+          "amount": 200
+        }
+      },
+      {
+        "type": "STAGE",
+        "data": {
+          "stage": "TURN",
+          "cards": [
+            "Js"
+          ]
+        }
+      },
+      {
+        "type": "ACTION",
+        "data": {
+          "uid": "p1",
+          "action": "CHECK",
+          "amount": 0
+        }
+      },
+      {
+        "type": "ACTION",
+        "data": {
+          "uid": "p2",
+          "action": "BET",
+          "amount": 200
+        }
+      },
+      {
+        "type": "ACTION",
+        "data": {
+          "uid": "p3",
+          "action": "CALL",
+          "amount": 200
+        }
+      },
+      {
+        "type": "ACTION",
+        "data": {
+          "uid": "p4",
+          "action": "CALL",
+          "amount": 200
+        }
+      },
+      {
+        "type": "ACTION",
+        "data": {
+          "uid": "p1",
+          "action": "CALL",
+          "amount": 200
+        }
+      },
+      {
+        "type": "STAGE",
+        "data": {
+          "stage": "RIVER",
+          "cards": [
+            "Ad"
+          ]
+        }
+      },
+      {
+        "type": "ACTION",
+        "data": {
+          "uid": "p1",
+          "action": "CHECK",
+          "amount": 0
+        }
+      },
+      {
+        "type": "ACTION",
+        "data": {
+          "uid": "p2",
+          "action": "BET",
+          "amount": 200
+        }
+      },
+      {
+        "type": "ACTION",
+        "data": {
+          "uid": "p3",
+          "action": "CALL",
+          "amount": 200
+        }
+      },
+      {
+        "type": "ACTION",
+        "data": {
+          "uid": "p4",
+          "action": "CALL",
+          "amount": 200
+        }
+      },
+      {
+        "type": "ACTION",
+        "data": {
+          "uid": "p1",
+          "action": "CALL",
+          "amount": 200
+        }
+      },
+      {
+        "type": "OVER",
+        "data": {
+          "winners": [
+            {
+              "uid": "p2",
+              "amount": 4000
+            }
+          ]
+        }
+      }
+    ],
+    "13": [
+      {
+        "type": "START",
+        "data": {
+          "gameKey": "classic#13",
+          "ante": 0,
+          "smallBlind": 100,
+          "bigBlind": 200,
+          "buttonSeatNumber": 1,
+          "players": [
+            {
+              "uid": "p1",
+              "seat": 1,
+              "hero": true,
+              "stack": 13400
+            },
+            {
+              "uid": "p2",
+              "seat": 2,
+              "hero": false,
+              "stack": 32200
+            },
+            {
+              "uid": "p3",
+              "seat": 3,
+              "hero": false,
+              "stack": 16900
+            },
+            {
+              "uid": "p4",
+              "seat": 4,
+              "hero": false,
+              "stack": 17200
+            }
+          ],
+          "gameType": "SQUID",
+          "squidMode": "STAND_UP",
+          "squidCost": 300,
+          "squidNumber": 3,
+          "squidRound": 10,
+          "squidPlayed": 1,
+          "network": "WPK_CLUB",
+          "playerCounts": {
+            "p1": 0,
+            "p2": 1,
+            "p3": 0,
+            "p4": 0
+          }
+        }
+      },
+      {
+        "type": "BLIND_POSTED",
+        "data": {
+          "uid": "p2",
+          "type": "SB",
+          "amount": 100
+        }
+      },
+      {
+        "type": "BLIND_POSTED",
+        "data": {
+          "uid": "p3",
+          "type": "BB",
+          "amount": 200
+        }
+      },
+      {
+        "type": "STAGE",
+        "data": {
+          "stage": "PREFLOP",
+          "cards": []
+        }
+      },
+      {
+        "type": "DEALT",
+        "data": {
+          "cards": [
+            "Kc",
+            "Td"
+          ]
+        }
+      },
+      {
+        "type": "ACTION",
+        "data": {
+          "uid": "p4",
+          "action": "CALL",
+          "amount": 200
+        }
+      },
+      {
+        "type": "ACTION",
+        "data": {
+          "uid": "p1",
+          "action": "CALL",
+          "amount": 200
+        }
+      },
+      {
+        "type": "ACTION",
+        "data": {
+          "uid": "p2",
+          "action": "CALL",
+          "amount": 100
+        }
+      },
+      {
+        "type": "ACTION",
+        "data": {
+          "uid": "p3",
+          "action": "RAISE",
+          "amount": 200
+        }
+      },
+      {
+        "type": "ACTION",
+        "data": {
+          "uid": "p4",
+          "action": "CALL",
+          "amount": 200
+        }
+      },
+      {
+        "type": "ACTION",
+        "data": {
+          "uid": "p1",
+          "action": "RAISE",
+          "amount": 1800
+        }
+      },
+      {
+        "type": "ACTION",
+        "data": {
+          "uid": "p2",
+          "action": "CALL",
+          "amount": 1800
+        }
+      },
+      {
+        "type": "ACTION",
+        "data": {
+          "uid": "p3",
+          "action": "CALL",
+          "amount": 1600
+        }
+      },
+      {
+        "type": "ACTION",
+        "data": {
+          "uid": "p4",
+          "action": "CALL",
+          "amount": 1600
+        }
+      },
+      {
+        "type": "STAGE",
+        "data": {
+          "stage": "FLOP",
+          "cards": [
+            "6h",
+            "Ah",
+            "5d"
+          ]
+        }
+      },
+      {
+        "type": "ACTION",
+        "data": {
+          "uid": "p2",
+          "action": "FOLD",
+          "amount": 0
+        }
+      },
+      {
+        "type": "ACTION",
+        "data": {
+          "uid": "p3",
+          "action": "FOLD",
+          "amount": 0
+        }
+      },
+      {
+        "type": "ACTION",
+        "data": {
+          "uid": "p4",
+          "action": "BET",
+          "amount": 200
+        }
+      },
+      {
+        "type": "ACTION",
+        "data": {
+          "uid": "p1",
+          "action": "CALL",
+          "amount": 200
+        }
+      },
+      {
+        "type": "STAGE",
+        "data": {
+          "stage": "TURN",
+          "cards": [
+            "3h"
+          ]
+        }
+      },
+      {
+        "type": "ACTION",
+        "data": {
+          "uid": "p4",
+          "action": "BET",
+          "amount": 200
+        }
+      },
+      {
+        "type": "ACTION",
+        "data": {
+          "uid": "p1",
+          "action": "CALL",
+          "amount": 200
+        }
+      },
+      {
+        "type": "STAGE",
+        "data": {
+          "stage": "RIVER",
+          "cards": [
+            "Ts"
+          ]
+        }
+      },
+      {
+        "type": "ACTION",
+        "data": {
+          "uid": "p4",
+          "action": "BET",
+          "amount": 200
+        }
+      },
+      {
+        "type": "ACTION",
+        "data": {
+          "uid": "p1",
+          "action": "CALL",
+          "amount": 200
+        }
+      },
+      {
+        "type": "GOT_SQUID",
+        "data": {
+          "uid": "p1",
+          "count": 1
+        }
+      },
+      {
+        "type": "OVER",
+        "data": {
+          "winners": [
+            {
+              "uid": "p1",
+              "amount": 9200
+            }
+          ]
+        }
+      }
+    ],
+    "14": [
+      {
+        "type": "START",
+        "data": {
+          "gameKey": "classic#14",
+          "ante": 0,
+          "smallBlind": 100,
+          "bigBlind": 200,
+          "buttonSeatNumber": 2,
+          "players": [
+            {
+              "uid": "p1",
+              "seat": 1,
+              "hero": true,
+              "stack": 20000
+            },
+            {
+              "uid": "p2",
+              "seat": 2,
+              "hero": false,
+              "stack": 30300
+            },
+            {
+              "uid": "p3",
+              "seat": 3,
+              "hero": false,
+              "stack": 15000
+            },
+            {
+              "uid": "p4",
+              "seat": 4,
+              "hero": false,
+              "stack": 14400
+            }
+          ],
+          "gameType": "SQUID",
+          "squidMode": "STAND_UP",
+          "squidCost": 300,
+          "squidNumber": 3,
+          "squidRound": 10,
+          "squidPlayed": 2,
+          "network": "WPK_CLUB",
+          "playerCounts": {
+            "p1": 1,
+            "p2": 1,
+            "p3": 0,
+            "p4": 0
+          }
+        }
+      },
+      {
+        "type": "BLIND_POSTED",
+        "data": {
+          "uid": "p3",
+          "type": "SB",
+          "amount": 100
+        }
+      },
+      {
+        "type": "BLIND_POSTED",
+        "data": {
+          "uid": "p4",
+          "type": "BB",
+          "amount": 200
+        }
+      },
+      {
+        "type": "STAGE",
+        "data": {
+          "stage": "PREFLOP",
+          "cards": []
+        }
+      },
+      {
+        "type": "DEALT",
+        "data": {
+          "cards": [
+            "6c",
+            "2c"
+          ]
+        }
+      },
+      {
+        "type": "ACTION",
+        "data": {
+          "uid": "p1",
+          "action": "CALL",
+          "amount": 200
+        }
+      },
+      {
+        "type": "ACTION",
+        "data": {
+          "uid": "p2",
+          "action": "CALL",
+          "amount": 200
+        }
+      },
+      {
+        "type": "ACTION",
+        "data": {
+          "uid": "p3",
+          "action": "CALL",
+          "amount": 100
+        }
+      },
+      {
+        "type": "ACTION",
+        "data": {
+          "uid": "p4",
+          "action": "RAISE",
+          "amount": 200
+        }
+      },
+      {
+        "type": "ACTION",
+        "data": {
+          "uid": "p1",
+          "action": "CALL",
+          "amount": 200
+        }
+      },
+      {
+        "type": "ACTION",
+        "data": {
+          "uid": "p2",
+          "action": "CALL",
+          "amount": 200
+        }
+      },
+      {
+        "type": "ACTION",
+        "data": {
+          "uid": "p3",
+          "action": "CALL",
+          "amount": 200
+        }
+      },
+      {
+        "type": "STAGE",
+        "data": {
+          "stage": "FLOP",
+          "cards": [
+            "Td",
+            "5c",
+            "Ad"
+          ]
+        }
+      },
+      {
+        "type": "ACTION",
+        "data": {
+          "uid": "p3",
+          "action": "CHECK",
+          "amount": 0
+        }
+      },
+      {
+        "type": "ACTION",
+        "data": {
+          "uid": "p4",
+          "action": "CHECK",
+          "amount": 0
+        }
+      },
+      {
+        "type": "ACTION",
+        "data": {
+          "uid": "p1",
+          "action": "CHECK",
+          "amount": 0
+        }
+      },
+      {
+        "type": "ACTION",
+        "data": {
+          "uid": "p2",
+          "action": "CHECK",
+          "amount": 0
+        }
+      },
+      {
+        "type": "STAGE",
+        "data": {
+          "stage": "TURN",
+          "cards": [
+            "Qd"
+          ]
+        }
+      },
+      {
+        "type": "ACTION",
+        "data": {
+          "uid": "p3",
+          "action": "CHECK",
+          "amount": 0
+        }
+      },
+      {
+        "type": "ACTION",
+        "data": {
+          "uid": "p4",
+          "action": "BET",
+          "amount": 200
+        }
+      },
+      {
+        "type": "ACTION",
+        "data": {
+          "uid": "p1",
+          "action": "CALL",
+          "amount": 200
+        }
+      },
+      {
+        "type": "ACTION",
+        "data": {
+          "uid": "p2",
+          "action": "CALL",
+          "amount": 200
+        }
+      },
+      {
+        "type": "ACTION",
+        "data": {
+          "uid": "p3",
+          "action": "FOLD",
+          "amount": 0
+        }
+      },
+      {
+        "type": "STAGE",
+        "data": {
+          "stage": "RIVER",
+          "cards": [
+            "8c"
+          ]
+        }
+      },
+      {
+        "type": "ACTION",
+        "data": {
+          "uid": "p4",
+          "action": "BET",
+          "amount": 200
+        }
+      },
+      {
+        "type": "ACTION",
+        "data": {
+          "uid": "p1",
+          "action": "CALL",
+          "amount": 200
+        }
+      },
+      {
+        "type": "ACTION",
+        "data": {
+          "uid": "p2",
+          "action": "RAISE",
+          "amount": 2400
+        }
+      },
+      {
+        "type": "ACTION",
+        "data": {
+          "uid": "p4",
+          "action": "CALL",
+          "amount": 2200
+        }
+      },
+      {
+        "type": "ACTION",
+        "data": {
+          "uid": "p1",
+          "action": "CALL",
+          "amount": 2200
+        }
+      },
+      {
+        "type": "GOT_SQUID",
+        "data": {
+          "uid": "p4",
+          "count": 1
+        }
+      },
+      {
+        "type": "OVER",
+        "data": {
+          "winners": [
+            {
+              "uid": "p4",
+              "amount": 9400
+            }
+          ],
+          "squid": [
+            {
+              "uid": "p2",
+              "type": "payout",
+              "amount": 300
+            },
+            {
+              "uid": "p1",
+              "type": "payout",
+              "amount": 300
+            },
+            {
+              "uid": "p4",
+              "type": "payout",
+              "amount": 300
+            },
+            {
+              "uid": "p3",
+              "type": "penaly",
+              "amount": 900
+            }
+          ]
+        }
+      }
+    ]
+  }
+}
